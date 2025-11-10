@@ -1,0 +1,14 @@
+Testing the Device Driver:
+
+Build the driver by using Makefile (sudo make)
+Load the driver using sudo insmod driver.ko
+use sudo su and enter the password if required to get the root permission
+echo 1 > /dev/etx_device [This must turn ON the LED].
+echo 0 > /dev/etx_device [This must turn OFF the LED].
+cat /dev/etx_device [Read the GPIO value].
+
+Since we are exporting the GPIO 21 to the sysfs using gpio_export(), the below steps also should work.
+
+echo 1 > /sys/class/gpio/gpio21/value [This must turn ON the LED].
+echo 0 > /sys/class/gpio/gpio21/value [This must turn OFF the LED].
+cat /sys/class/gpio/gpio21/value [Read the GPIO value].
