@@ -10,6 +10,7 @@
 #include <linux/device.h>
 #include <linux/uaccess.h>
 #include <linux/ioctl.h>
+#include <linux/delay.h>
 
 // External functions from gpio_controller
 extern int gpio_controller_init(void);
