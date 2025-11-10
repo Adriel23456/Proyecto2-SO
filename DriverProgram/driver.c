@@ -16,7 +16,7 @@
 #include <linux/gpio/consumer.h>
 #include <linux/gpio.h>
 
-#define GPIO_NUM (24)
+#define GPIO_NUM (24+512)  // GPIO 24 on GPIO controller 1 (i.e., GPIO1_24)
  
 dev_t dev = 0;
 static struct class *dev_class;

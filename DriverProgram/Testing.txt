@@ -18,7 +18,7 @@ cat /sys/class/gpio/gpio21/value [Read the GPIO value].
 Commands:
 # Para actualizar el repo
 cd /home/admin/Documents/Proyecto2-SO
-git pull origin main
+git pull origin master
 
 
 # Compilar el driver
