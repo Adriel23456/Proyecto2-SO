@@ -18,10 +18,10 @@ lsmod | grep gpio_controller
 lsmod | grep tft_driver
 
 ## Probar círculo rojo
-./test_tft
+sudo ./test_tft
 
 ## Resetear pantalla
-./test_tft r
+sudo ./test_tft r
 
 ## Descargar drivers
 sudo rmmod tft_driver
