@@ -138,7 +138,7 @@ static int __init etx_driver_init(void)
   }
  
   /*Creating struct class*/
-  if(IS_ERR(dev_class = class_create(THIS_MODULE,"etx_class"))){
+  if(IS_ERR(dev_class = class_create("etx_class"))){
     pr_err("Cannot create the struct class\n");
     goto r_class;
   }
@@ -172,7 +172,7 @@ static int __init etx_driver_init(void)
   ** 
   ** the second argument prevents the direction from being changed.
   */
-  gpio_export(GPIO_21, false);
+  //gpio_export(GPIO_21, false); // Deprecado en kernel 6.x
   
   pr_info("Device Driver Insert...Done!!!\n");
   return 0;
@@ -196,7 +196,7 @@ r_unreg:
 */ 
 static void __exit etx_driver_exit(void)
 {
-  gpio_unexport(GPIO_21);
+  // gpio_unexport(GPIO_21); // Deprecado en kernel 6.x
   gpio_free(GPIO_21);
   device_destroy(dev_class,dev);
   class_destroy(dev_class);
