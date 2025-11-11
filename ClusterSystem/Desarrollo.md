@@ -1,35 +1,48 @@
-# 🧠 Instalación y Configuración de un Clúster MPI (Master/Slave)
+# 🧠 Instalación y Configuración de un Clúster Beowulf con OpenMPI
 
-> **Objetivo:** Configurar un entorno de cómputo distribuido con OpenMPI y SSH en sistemas modernos (Ubuntu / Raspberry Pi OS).
+> **Objetivo:** Configurar un entorno de cómputo distribuido tipo *Beowulf* utilizando **OpenMPI** y **SSH** en sistemas basados en Linux (Ubuntu / Raspberry Pi OS).
 
 ---
 
-## 🧩 Paso 1. Instalación de OpenMPI en todos los nodos (Master y Slaves)
+## ⚙️ Requisitos previos
 
-### 🔹 Ubuntu 25.04 / Raspberry Pi OS (Debian 12 base)
+* Todos los nodos (master y slaves) deben estar en la **misma red local (LAN)**.
+* Cada nodo debe tener instalado **Linux Ubuntu** o **Raspberry Pi OS (Debian 12+)**.
+* Todos los nodos deben poder **hacer ping** entre sí.
+* Se recomienda asignar **IPs fijas** o configurar las IPs manualmente en `/etc/hosts`.
+
+---
+
+## 🧩 Paso 1. Instalar OpenMPI en todos los nodos
+
+Ejecuta lo siguiente en **cada nodo (Master y Slaves):**
 
 ```bash
 sudo apt update && sudo apt upgrade -y
 sudo apt install openmpi-bin openmpi-common libopenmpi-dev -y
 ```
 
-✅ **Verificar instalación:**
+✅ **Verifica la instalación:**
 
 ```bash
 mpirun --version
 ```
 
+Debería mostrar la versión instalada de OpenMPI.
+
 ---
 
-## 🔐 Paso 2. Instalación de OpenSSH Server (Solo en nodos *Slave*)
+## 🔐 Paso 2. Instalar y habilitar SSH
 
-El servidor SSH permite que el nodo maestro controle los nodos esclavos.
+### 🔸 En los nodos *Slave* (servidores controlados)
+
+Instala el servidor SSH:
 
 ```bash
 sudo apt install openssh-server -y
 ```
 
-✅ **Verificar que el servicio esté activo:**
+Habilita y verifica el servicio:
 
 ```bash
 sudo systemctl enable ssh
@@ -39,9 +52,9 @@ sudo systemctl status ssh
 
 ---
 
-## 💻 Paso 3. Instalación de OpenSSH Client (Solo en el nodo *Master*)
+### 🔸 En el nodo *Master* (controlador)
 
-El cliente SSH es necesario para que el nodo maestro pueda comunicarse con los esclavos.
+Instala el cliente SSH:
 
 ```bash
 sudo apt install openssh-client -y
@@ -49,142 +62,164 @@ sudo apt install openssh-client -y
 
 ---
 
-De aqui en adelante esta raro porque lo que hacemos primero es obtener las ip de los master + slaves:
+## 🌐 Paso 3. Obtener las direcciones IP de cada nodo
+
+Para ver la IP local de cada máquina:
+
+```bash
 hostname -I
+```
 
-Asegurarse de instalar esto con:
-sudo apt install net-tools
+Si el comando no existe, instala las herramientas de red:
 
-Luego obtenemos las direcciones IP y las asignamos tal que asi:
---- (TODOS)
-192.168.18.242  Master
-192.168.18.10   Slave1
-192.168.18.241  Slave2
-etc
----
-Esto usando el comando de:
+```bash
+sudo apt install net-tools -y
+```
+
+Luego edita el archivo `/etc/hosts` en **todos los nodos** para mapear las direcciones IP:
+
+```bash
 sudo nano /etc/hosts
+```
 
-LEUgo con ctrl+o y ctrl+x guardamos y salimos!
+Ejemplo de configuración:
 
+```
+192.168.18.242  master
+192.168.18.10   slave1
+192.168.18.241  slave2
+```
 
-## 🔑 Paso 4. Generación de Claves SSH (En todos los nodos)
+Guarda con **Ctrl+O** y cierra con **Ctrl+X**.
 
-Genera una clave **sin contraseña** para permitir la conexión automática entre nodos SOLO EN EL MASTER:
+> ⚠️ Es importante que los nombres aquí definidos coincidan con los que usaremos en el archivo de hosts MPI.
+
+---
+
+## 🔑 Paso 4. Generar y distribuir claves SSH (para conexión sin contraseña)
+
+Desde el **nodo Master**, genera una clave RSA sin contraseña:
 
 ```bash
 ssh-keygen -t rsa -b 4096 -N "" -f ~/.ssh/id_rsa
 ```
 
-> 🔸 Usa `rsa` o `ed25519`
+Esto crea los archivos:
 
-Luego nos vamos a asegurar de que el nodo maestro este autorizado y para hacer esto, para esto el nodo maestro aplica estos comandos (cambiar adriel por el nombre de usuario principal del PC):
-scp ~/.ssh/id_rsa.pub adriel@192.168.18.10:~/.ssh/authorized_keys
-scp ~/.ssh/id_rsa.pub adriel@192.168.18.241:~/.ssh/authorized_keys
+* `~/.ssh/id_rsa` → clave privada
+* `~/.ssh/id_rsa.pub` → clave pública
 
+Luego, copia la clave pública a los nodos *Slave* (reemplaza `usuario` por tu nombre real):
 
-LUego en cada slave tengo que ejecutar:
+```bash
+scp ~/.ssh/id_rsa.pub usuario@192.168.18.10:~/.ssh/authorized_keys
+scp ~/.ssh/id_rsa.pub usuario@192.168.18.241:~/.ssh/authorized_keys
+```
+
+En **cada nodo Slave**, ajusta los permisos:
+
+```bash
 chmod 700 ~/.ssh
 chmod 600 ~/.ssh/authorized_keys
-
-
-Luego, copia la clave pública del nodo maestro a cada nodo esclavo:
-
-```bash
-ssh-copy-id usuario@slave1
-ssh-copy-id usuario@slave2
 ```
 
-(O reemplaza `usuario` y los nombres según tu configuración.)
+✅ **Prueba la conexión:**
+
+Desde el Master:
+
+```bash
+ssh usuario@192.168.18.10
+ssh usuario@192.168.18.241
+```
+
+Si entras sin que te pida contraseña, la conexión SSH está correctamente configurada.
 
 ---
 
-## 🗂️ Paso 5. Configuración del Archivo `/etc/hosts`
+## 🧾 Paso 5. Crear el archivo de configuración de nodos MPI
 
-Edita este archivo en **todos los nodos** para asignar nombres legibles a las IPs de cada máquina:
+Crea el archivo `~/.mpi_hostfile` en el **nodo Master**:
 
 ```bash
-sudo nano /etc/hosts
+nano ~/.mpi_hostfile
 ```
 
-Agrega líneas como las siguientes:
+Ejemplo de contenido:
 
 ```
-192.168.1.10 master
-192.168.1.11 slave1
-192.168.1.12 slave2
+localhost slots=2
+slave1 slots=2
+slave2 slots=2
 ```
 
-> Esto permitirá conectar los nodos usando sus nombres en lugar de direcciones IP.
+Donde:
+
+* `localhost` → el propio nodo Master.
+* `slots` → número de procesos o núcleos que ese nodo puede usar.
+* `slave1`, `slave2` → nombres definidos en `/etc/hosts`.
+
+Guarda con **Ctrl+O** y cierra con **Ctrl+X**.
 
 ---
 
-## 🔧 Paso 6. Prueba de Conectividad SSH
+## ⚙️ Paso 6. Preparar el código a ejecutar
 
-Desde el nodo maestro:
+El programa a ejecutar (por ejemplo `ejemplo.c`) debe estar en **la misma ruta en todos los nodos**.
+
+Compila el programa en cada máquina:
 
 ```bash
-ssh master
-ssh slave1
-ssh slave2
+mpicc ejemplo.c -o ejemplo
 ```
 
-Si no pide contraseña, la configuración es correcta ✅
+Esto generará un binario `./ejemplo` listo para ejecutar en paralelo.
 
 ---
 
-## 🧪 Paso 7. Prueba de OpenMPI
+## 🚀 Paso 7. Ejecutar el programa desde el nodo Master
 
-Crea un archivo de prueba llamado `test_mpi.c`:
+Desde el Master:
+
+```bash
+mpirun -np 4 --hostfile ~/.mpi_hostfile ./ejemplo
+```
+
+Explicación:
+
+* `-np 4` → número total de procesos a ejecutar.
+* `--hostfile ~/.mpi_hostfile` → archivo con los nodos del clúster.
+* `./ejemplo` → programa compilado a ejecutar.
+
+---
+
+## ✅ Verificación de funcionamiento
+
+Si la configuración fue correcta, deberías ver que los procesos se distribuyen entre el Master y los Slaves.
+Puedes comprobarlo con un programa de prueba como este:
 
 ```c
 #include <mpi.h>
 #include <stdio.h>
 
 int main(int argc, char** argv) {
-    MPI_Init(NULL, NULL);
-    int world_rank, world_size;
-    MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+    int world_size, world_rank;
+    MPI_Init(&argc, &argv);
     MPI_Comm_size(MPI_COMM_WORLD, &world_size);
-    printf("Hello from processor %d of %d\n", world_rank, world_size);
+    MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+    printf("Hola desde el proceso %d de %d\n", world_rank, world_size);
     MPI_Finalize();
     return 0;
 }
 ```
 
-Compila y ejecuta:
-
-```bash
-mpicc test_mpi.c -o test_mpi
-mpirun -np 4 -host master,slave1,slave2 ./test_mpi
-```
+Compílalo y ejecútalo en el clúster.
+Deberías ver múltiples líneas con diferentes `world_rank`, indicando que el cómputo está distribuido.
 
 ---
 
-## ✅ Resultado Esperado
+## 🧰 Consejos finales
 
-Salida similar en consola:
-
-```
-Hello from processor 0 of 4
-Hello from processor 1 of 4
-Hello from processor 2 of 4
-Hello from processor 3 of 4
-```
-
----
-
-## 📘 Notas Finales
-
-* Usa redes LAN estables y verifica que los cortafuegos (firewalls) permitan SSH.
-* En Raspberry Pi, habilita SSH desde `raspi-config` si no está activo:
-
-  ```bash
-  sudo raspi-config
-  → Interfacing Options → SSH → Enable
-  ```
-* En sistemas modernos, se recomienda usar **`mpirun --oversubscribe`** si ejecutas más procesos que núcleos disponibles.
-
----
-
-¿Deseas que te prepare la **versión extendida en formato README.md** con numeración, emojis y comandos listos para copiar? Puedo dejarla con bloques plegables (`<details>`) estilo documentación profesional.
+* Asegúrate de que todos los nodos tengan **el mismo usuario** y **nombre de carpeta de trabajo**.
+* Revisa que las rutas en `/etc/hosts` sean idénticas en todos los equipos.
+* Puedes sincronizar carpetas con `rsync` o compartirlas por NFS si quieres mantener el mismo código centralizado.
+* Si hay errores de SSH, ejecuta con `mpirun -v` para modo detallado.
