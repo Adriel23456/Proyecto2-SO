@@ -148,13 +148,13 @@ GND  → LCD_CS (Chip Select - siempre activo)
 
 ### Actualizar repositorio
 ```bash
-cd /home/admin/Documents/Proyecto2-SO
+cd ~/Documents/Proyecto2-SO
 git pull origin master
 ```
 
 ### Compilar todo el sistema
 ```bash
-cd /home/admin/Documents/Proyecto2-SO/DriverProgram
+cd ~/Documents/Proyecto2-SO/DriverProgram
 sudo make clean
 sudo make
 ```

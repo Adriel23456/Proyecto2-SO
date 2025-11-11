@@ -43,7 +43,8 @@ available_count=0
 total_count=0
 
 # Leer cada línea del hostfile original
-while IFS= read -r line || [ -n "$line" ]; do
+# SOLUCIÓN: Usar descriptor de archivo 3 para evitar que SSH consuma stdin
+while IFS= read -r line <&3 || [ -n "$line" ]; do
     # Ignorar líneas vacías o comentarios
     [[ -z "$line" || "$line" =~ ^#.* ]] && continue
     
@@ -54,8 +55,8 @@ while IFS= read -r line || [ -n "$line" ]; do
     
     echo -n "Verificando $host... "
     
-    # Intentar conectar por SSH sin ejecutar comando (solo verificar conectividad)
-    ssh -o ConnectTimeout=$TIMEOUT -o BatchMode=yes -o StrictHostKeyChecking=no "$host" "exit" 2>/dev/null
+    # SOLUCIÓN: Redirigir stdin de ssh a /dev/null para no consumir el bucle
+    ssh -o ConnectTimeout=$TIMEOUT -o BatchMode=yes -o StrictHostKeyChecking=no "$host" "exit" < /dev/null 2>/dev/null
     
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}✓ DISPONIBLE${NC}"
@@ -64,7 +65,7 @@ while IFS= read -r line || [ -n "$line" ]; do
     else
         echo -e "${RED}✗ NO DISPONIBLE${NC}"
     fi
-done < "$ORIGINAL_HOSTFILE"
+done 3< "$ORIGINAL_HOSTFILE"
 
 echo ""
 echo -e "${YELLOW}Resumen:${NC}"
