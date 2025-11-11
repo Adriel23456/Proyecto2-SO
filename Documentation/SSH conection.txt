@@ -1,1 +1,3 @@
 ssh admin@raspberrypi.local
+
+Password: Secure123
