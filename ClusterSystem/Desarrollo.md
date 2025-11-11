@@ -240,7 +240,8 @@ Deberías ver múltiples líneas con diferentes `world_rank`, indicando que el c
 * Si hay errores de SSH, ejecuta con `mpirun -v` para modo detallado.
 
 
-
+COMANDOS DE EMERGENCIA:
+```bash
 sudo apt purge openmpi-bin openmpi-common libopenmpi-dev libopenmpi3 -y
 sudo apt autoremove -y
 
@@ -254,3 +255,7 @@ sudo make install
 echo 'export PATH=/usr/local/bin:$PATH' >> ~/.bashrc
 echo 'export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH' >> ~/.bashrc
 source ~/.bashrc
+```
+
+
+sudo apt purge -y openmpi-bin openmpi-common libopenmpi* || true
