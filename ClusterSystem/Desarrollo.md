@@ -177,6 +177,12 @@ El programa a ejecutar (por ejemplo `ejemplo.c`) debe estar en **la misma ruta e
 Compila el programa en cada máquina:
 
 ```bash
+mkdir -p ~/Documents
+cd Documents/
+git clone https://github.com/Adriel23456/Proyecto2-SO.git
+```
+
+```bash
 cd Documents/Proyecto2-SO/ClusterSystem
 mpicc ejemplo.c -o ejemplo
 ```
@@ -232,3 +238,19 @@ Deberías ver múltiples líneas con diferentes `world_rank`, indicando que el c
 * Revisa que las rutas en `/etc/hosts` sean idénticas en todos los equipos.
 * Puedes sincronizar carpetas con `rsync` o compartirlas por NFS si quieres mantener el mismo código centralizado.
 * Si hay errores de SSH, ejecuta con `mpirun -v` para modo detallado.
+
+
+
+sudo apt purge openmpi-bin openmpi-common libopenmpi-dev libopenmpi3 -y
+sudo apt autoremove -y
+
+sudo apt install build-essential wget -y
+wget https://download.open-mpi.org/release/open-mpi/v4.1/openmpi-4.1.6.tar.gz
+tar -xzf openmpi-4.1.6.tar.gz
+cd openmpi-4.1.6
+./configure --prefix=/usr/local
+make -j$(nproc)
+sudo make install
+echo 'export PATH=/usr/local/bin:$PATH' >> ~/.bashrc
+echo 'export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH' >> ~/.bashrc
+source ~/.bashrc
