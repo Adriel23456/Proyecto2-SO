@@ -59,6 +59,7 @@ sudo systemctl status ssh
   # si lo necesitas
   sudo adduser adriel
   sudo usermod -aG sudo adriel
+  su - adriel
   ```
 
 ---
