@@ -1,0 +1,1 @@
+Montaje del programa para el master y del programa para los slaves para ejecutarse como un sistema distribuido!!
