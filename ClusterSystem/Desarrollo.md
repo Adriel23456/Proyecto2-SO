@@ -242,20 +242,35 @@ Deberías ver múltiples líneas con diferentes `world_rank`, indicando que el c
 
 COMANDOS DE EMERGENCIA:
 ```bash
-sudo apt purge openmpi-bin openmpi-common libopenmpi-dev libopenmpi3 -y
-sudo apt autoremove -y
+cd ~
+wget https://www.mpich.org/static/downloads/4.3.2/mpich-4.3.2.tar.gz
+tar xzf mpich-4.3.2.tar.gz
+cd mpich-4.3.2
 
-sudo apt install build-essential wget -y
-wget https://download.open-mpi.org/release/open-mpi/v4.1/openmpi-4.1.6.tar.gz
-tar -xzf openmpi-4.1.6.tar.gz
-cd openmpi-4.1.6
-./configure --prefix=/usr/local
+# Soporte heterogéneo:
+./configure --prefix=/usr/local/mpich-4.3.2 --enable-heterogeneous
 make -j$(nproc)
 sudo make install
-echo 'export PATH=/usr/local/bin:$PATH' >> ~/.bashrc
-echo 'export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH' >> ~/.bashrc
+
+# Exportar rutas (para tu usuario)
+echo 'export PATH=/usr/local/mpich-4.3.2/bin:$PATH' >> ~/.bashrc
+echo 'export LD_LIBRARY_PATH=/usr/local/mpich-4.3.2/lib:$LD_LIBRARY_PATH' >> ~/.bashrc
 source ~/.bashrc
+
+#Verifica en cada nodo:
+which mpiexec
+mpichversion | head -n 1  # (si está el tool)
+mpiexec -n 1 bash -lc 'echo OK on $(uname -m)'
 ```
 
 
+
+
+
+cd ~/mpich-4.3.2 2>/dev/null || true
+make distclean 2>/dev/null || true
+cd ~
+sudo apt update
 sudo apt purge -y openmpi-bin openmpi-common libopenmpi* || true
+sudo apt autoremove -y
+sudo apt install -y build-essential wget
