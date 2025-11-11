@@ -1,142 +1,154 @@
 /***************************************************************************//**
 *  \file       libtft.h
-*  \details    Public API for TFT Display Library
-*  \brief      User-space library for TFT driver interaction
+*  \details    API pública de la biblioteca libtft
+*  \brief      Interfaz de usuario para controlar el display TFT
+*
+*  PROPÓSITO DE LA BIBLIOTECA:
+*  Esta biblioteca (libtft.a) abstrae la comunicación con el driver del kernel.
+*  Proporciona funciones de alto nivel para:
+*  - Inicializar/cerrar conexión con el display
+*  - Dibujar píxeles, rectángulos, llenar pantalla
+*  - Cargar imágenes desde archivos .cvc
+*
+*  FLUJO:
+*  Programa usuario -> libtft.a -> /dev/tft_device -> tft_driver.ko -> gpio_controller.ko -> Hardware
 *******************************************************************************/
 #ifndef LIBTFT_H
 #define LIBTFT_H
 
 #include <stdint.h>
 
-// Display dimensions
+/*
+ * Dimensiones del display (deben coincidir con el driver)
+ */
 #define TFT_WIDTH  240
 #define TFT_HEIGHT 320
 
-// Color definitions (RGB565)
-#define TFT_COLOR_BLACK   0x0000
-#define TFT_COLOR_WHITE   0xFFFF
-#define TFT_COLOR_RED     0xF800
-#define TFT_COLOR_GREEN   0x07E0
-#define TFT_COLOR_BLUE    0x001F
-#define TFT_COLOR_YELLOW  0xFFE0
-#define TFT_COLOR_CYAN    0x07FF
-#define TFT_COLOR_MAGENTA 0xF81F
-
-// Error codes
-#define TFT_SUCCESS       0
-#define TFT_ERROR_DEVICE  -1
-#define TFT_ERROR_MEMORY  -2
-#define TFT_ERROR_INVALID -3
-#define TFT_ERROR_IO      -4
-
-// Library handle
+/*
+ * Handle opaco para la biblioteca
+ * Contiene el file descriptor del dispositivo y estado
+ */
 typedef struct {
-    int fd;
-    int is_open;
+    int fd;        // File descriptor de /dev/tft_device
+    int is_open;   // Bandera: 1 si está abierto, 0 si cerrado
 } tft_handle_t;
 
 /***************************************************************************//**
-* \brief Initialize TFT display connection
-* \return Pointer to handle on success, NULL on failure
+* \brief Inicializa conexión con el display TFT
+* \return Puntero al handle si éxito, NULL si error
+*
+* FUNCIONAMIENTO:
+* - Abre /dev/tft_device
+* - Asigna estructura handle
+* - Retorna handle para usar en otras funciones
+*
+* EJEMPLO DE USO:
+*   tft_handle_t *tft = tft_init();
+*   if (!tft) {
+*       fprintf(stderr, "Error al inicializar\n");
+*       return 1;
+*   }
 *******************************************************************************/
 tft_handle_t* tft_init(void);
 
 /***************************************************************************//**
-* \brief Close TFT display connection
-* \param handle TFT handle
-* \return TFT_SUCCESS on success, error code on failure
+* \brief Cierra conexión con el display
+* \param handle Handle obtenido de tft_init()
+* \return 0 si éxito, -1 si error
+*
+* FUNCIONAMIENTO:
+* - Cierra file descriptor
+* - Libera memoria del handle
+*
+* SIEMPRE llamar al finalizar el programa
 *******************************************************************************/
 int tft_close(tft_handle_t *handle);
 
 /***************************************************************************//**
-* \brief Reset display to initial state
-* \param handle TFT handle
-* \return TFT_SUCCESS on success, error code on failure
+* \brief Reinicia el display a estado inicial
+* \param handle Handle del display
+* \return 0 si éxito, -1 si error
+*
+* Envía comando IOCTL de reset al driver
 *******************************************************************************/
 int tft_reset(tft_handle_t *handle);
 
 /***************************************************************************//**
-* \brief Draw single pixel
-* \param handle TFT handle
-* \param x X coordinate
-* \param y Y coordinate
-* \param color RGB565 color value
-* \return TFT_SUCCESS on success, error code on failure
+* \brief Dibuja un píxel individual
+* \param handle Handle del display
+* \param x Coordenada X (0-239)
+* \param y Coordenada Y (0-319)
+* \param color Color en formato RGB565
+* \return 0 si éxito, -1 si error
+*
+* NOTA: Dibujar píxeles uno por uno es LENTO
+* Para muchos píxeles, usar tft_fill_rect() o tft_load_cvc_file()
 *******************************************************************************/
 int tft_draw_pixel(tft_handle_t *handle, uint16_t x, uint16_t y, uint16_t color);
 
 /***************************************************************************//**
-* \brief Fill entire screen with color
-* \param handle TFT handle
-* \param color RGB565 color value
-* \return TFT_SUCCESS on success, error code on failure
+* \brief Llena toda la pantalla con un color
+* \param handle Handle del display
+* \param color Color RGB565
+* \return 0 si éxito, -1 si error
+*
+* Escribe 76,800 píxeles (240x320)
+* Toma aproximadamente 1-2 segundos
 *******************************************************************************/
 int tft_fill_screen(tft_handle_t *handle, uint16_t color);
 
 /***************************************************************************//**
-* \brief Clear screen (fill with black)
-* \param handle TFT handle
-* \return TFT_SUCCESS on success, error code on failure
-*******************************************************************************/
-int tft_clear(tft_handle_t *handle);
-
-/***************************************************************************//**
-* \brief Load and display image from CVC file
-* \param handle TFT handle
-* \param filename Path to .cvc file
-* \return TFT_SUCCESS on success, error code on failure
-*******************************************************************************/
-int tft_load_cvc_file(tft_handle_t *handle, const char *filename);
-
-/***************************************************************************//**
-* \brief Draw histogram on display
-* \param handle TFT handle
-* \param values Array of histogram values
-* \param num_bars Number of bars in histogram
-* \param max_value Maximum value for scaling
-* \return TFT_SUCCESS on success, error code on failure
-*******************************************************************************/
-int tft_draw_histogram(tft_handle_t *handle, const int *values, int num_bars, int max_value);
-
-/***************************************************************************//**
-* \brief Draw rectangle
-* \param handle TFT handle
-* \param x X coordinate
-* \param y Y coordinate
-* \param width Width of rectangle
-* \param height Height of rectangle
-* \param color RGB565 color value
-* \return TFT_SUCCESS on success, error code on failure
-*******************************************************************************/
-int tft_draw_rect(tft_handle_t *handle, uint16_t x, uint16_t y, 
-                  uint16_t width, uint16_t height, uint16_t color);
-
-/***************************************************************************//**
-* \brief Draw filled rectangle
-* \param handle TFT handle
-* \param x X coordinate
-* \param y Y coordinate
-* \param width Width of rectangle
-* \param height Height of rectangle
-* \param color RGB565 color value
-* \return TFT_SUCCESS on success, error code on failure
+* \brief Dibuja rectángulo relleno
+* \param handle Handle del display
+* \param x Coordenada X esquina superior izquierda
+* \param y Coordenada Y esquina superior izquierda
+* \param width Ancho del rectángulo
+* \param height Alto del rectángulo
+* \param color Color RGB565
+* \return 0 si éxito, -1 si error
+*
+* Valida que el rectángulo esté dentro de los límites del display
 *******************************************************************************/
 int tft_fill_rect(tft_handle_t *handle, uint16_t x, uint16_t y, 
                   uint16_t width, uint16_t height, uint16_t color);
 
 /***************************************************************************//**
-* \brief Convert RGB888 to RGB565
-* \param r Red component (0-255)
-* \param g Green component (0-255)
-* \param b Blue component (0-255)
-* \return RGB565 color value
+* \brief Carga y dibuja imagen desde archivo .cvc
+* \param handle Handle del display
+* \param filename Ruta al archivo .cvc
+* \return 0 si éxito, -1 si error
+*
+* FORMATO .CVC:
+* Primera línea: pixelx<TAB>pixely<TAB>value
+* Líneas siguientes: X<TAB>Y<TAB>COLOR
+*
+* EJEMPLO:
+*   pixelx  pixely  value
+*   0       0       0
+*   1       0       65535
+*   ...
+*
+* COLOR está en formato RGB565 (0-65535)
 *******************************************************************************/
-uint16_t tft_rgb_to_color(uint8_t r, uint8_t g, uint8_t b);
+int tft_load_cvc_file(tft_handle_t *handle, const char *filename);
 
 /***************************************************************************//**
-* \brief Get last error message
-* \return Error message string
+* \brief Convierte RGB (8 bits por canal) a RGB565
+* \param r Componente rojo (0-255)
+* \param g Componente verde (0-255)
+* \param b Componente azul (0-255)
+* \return Color en formato RGB565
+*
+* RGB565: RRRRRGGGGGGBBBBB
+* - 5 bits para rojo
+* - 6 bits para verde (ojo humano más sensible)
+* - 5 bits para azul
+*
+* EJEMPLO:
+*   uint16_t red = tft_rgb_to_color(255, 0, 0);     // 0xF800
+*   uint16_t green = tft_rgb_to_color(0, 255, 0);   // 0x07E0
+*   uint16_t blue = tft_rgb_to_color(0, 0, 255);    // 0x001F
 *******************************************************************************/
-const char* tft_get_error(void);
+uint16_t tft_rgb_to_color(uint8_t r, uint8_t g, uint8_t b);
 
 #endif /* LIBTFT_H */
