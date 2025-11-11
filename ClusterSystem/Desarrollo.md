@@ -50,6 +50,14 @@ sudo systemctl start ssh
 sudo systemctl status ssh
 ```
 
+Como extra, asegurarse de tener el mismo nombre de usuario tal que asi:
+
+```bash
+sudo adduser so-proy2
+sudo usermod -aG sudo so-proy2
+su - so-proy2
+```
+
 ---
 
 ### 🔸 En el nodo *Master* (controlador)
@@ -169,6 +177,7 @@ El programa a ejecutar (por ejemplo `ejemplo.c`) debe estar en **la misma ruta e
 Compila el programa en cada máquina:
 
 ```bash
+cd Documents/Proyecto2-SO/ClusterSystem
 mpicc ejemplo.c -o ejemplo
 ```
 
