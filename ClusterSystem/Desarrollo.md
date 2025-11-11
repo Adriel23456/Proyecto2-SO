@@ -1,216 +1,259 @@
-# 🧠 Instalación y Configuración de un Clúster Beowulf con OpenMPI
+# 🧠 Clúster Beowulf **heterogéneo** con **MPICH (Hydra)** — Guía limpia y replicable
 
-> **Objetivo:** Configurar un entorno de cómputo distribuido tipo *Beowulf* utilizando **OpenMPI** y **SSH** en sistemas basados en Linux (Ubuntu / Raspberry Pi OS).
-
----
-
-## ⚙️ Requisitos previos
-
-* Todos los nodos (master y slaves) deben estar en la **misma red local (LAN)**.
-* Cada nodo debe tener instalado **Linux Ubuntu** o **Raspberry Pi OS (Debian 12+)**.
-* Todos los nodos deben poder **hacer ping** entre sí.
-* Se recomienda asignar **IPs fijas** o configurar las IPs manualmente en `/etc/hosts`.
+> **Objetivo:** Montar un clúster Beowulf (master + slaves) mezclando **Raspberry Pi 32-bit** y **PCs x86_64**, usando **MPICH 4.3.2 (Hydra)** sobre **SSH**.
+> **Resultado esperado:** `mpiexec -n 4 ./ejemplo` imprime 4 líneas “Hola desde el proceso …”.
 
 ---
 
-## 🧩 Paso 1. Instalar OpenMPI en todos los nodos
+## 0) Nombres e IPs coherentes (sin borrar nada especial)
 
-Ejecuta lo siguiente en **cada nodo (Master y Slaves):**
+1. **Obtén la IP de cada nodo**:
 
-```bash
-sudo apt update && sudo apt upgrade -y
-sudo apt install openmpi-bin openmpi-common libopenmpi-dev -y
-```
+   ```bash
+   hostname -I
+   ```
 
-✅ **Verifica la instalación:**
+   > Si no tienes la herramienta en algún nodo: `sudo apt install -y net-tools` (opcional).
 
-```bash
-mpirun --version
-```
+2. **Edita `/etc/hosts` en *todos* los nodos con `nano`**:
 
-Debería mostrar la versión instalada de OpenMPI.
+   ```bash
+   sudo nano /etc/hosts
+   ```
+
+   **EJEMPLO (ajusta tus IPs reales):**
+
+   ```
+   192.168.18.242  raspberrypi master
+   192.168.18.10   slave1
+   192.168.18.241  slave2
+   ```
+
+   * “raspberrypi” es el **hostname real** del Pi.
+   * “master” es un **alias contextual** para el Pi.
+   * No es necesario eliminar ni comentar líneas; solo asegura que el **nombre coincida con su IP**.
+
+3. **Verifica desde cada nodo**:
+
+   ```bash
+   getent hosts raspberrypi
+   ping -c 2 raspberrypi
+   ```
 
 ---
 
-## 🔐 Paso 2. Instalar y habilitar SSH
+## 1) Instala e inicializa **SSH** en cada nodo
 
-### 🔸 En los nodos *Slave* (servidores controlados)
-
-Instala el servidor SSH:
+> Repite en **Pi y en cada PC** (master y slaves).
 
 ```bash
-sudo apt install openssh-server -y
-```
-
-Habilita y verifica el servicio:
-
-```bash
-sudo systemctl enable ssh
-sudo systemctl start ssh
+sudo apt update
+sudo apt install -y openssh-server openssh-client
+sudo systemctl enable --now ssh
 sudo systemctl status ssh
 ```
 
-Como extra, asegurarse de tener el mismo nombre de usuario tal que asi:
+* **Mismo usuario** en todos los nodos (recomendado):
+
+  ```bash
+  # si lo necesitas
+  sudo adduser adriel
+  sudo usermod -aG sudo adriel
+  ```
+
+---
+
+## 2) Instala **MPICH 4.3.2 (Hydra)** con soporte heterogéneo
+
+> Repite en **todos los nodos** (Pi y PCs). Mismo `--prefix` y **mismos flags** en todos.
+
+### Raspberry Pi (ARM 32-bit)
 
 ```bash
-sudo adduser so-proy2
-sudo usermod -aG sudo so-proy2
-su - so-proy2
+cd ~
+[ -d mpich-4.3.2 ] || (wget https://www.mpich.org/static/downloads/4.3.2/mpich-4.3.2.tar.gz && tar xzf mpich-4.3.2.tar.gz)
+cd mpich-4.3.2
+make distclean 2>/dev/null || true
+
+./configure --prefix=/usr/local/mpich-4.3.2 \
+  --disable-fortran \
+  --with-device=ch3:sock
+
+make -j$(nproc)
+sudo make install
+
+echo 'export PATH=/usr/local/mpich-4.3.2/bin:$PATH' >> ~/.bashrc
+echo 'export LD_LIBRARY_PATH=/usr/local/mpich-4.3.2/lib:$LD_LIBRARY_PATH' >> ~/.bashrc
+source ~/.bashrc
+
+echo '/usr/local/mpich-4.3.2/lib' | sudo tee /etc/ld.so.conf.d/mpich-4.3.2.conf
+sudo ldconfig
+
+which mpiexec
+mpiexec -n 1 bash -lc 'echo OK on $(uname -m)'
+```
+
+### Slaves x86_64 (PCs Ubuntu 64-bit)
+
+```bash
+cd ~
+[ -d mpich-4.3.2 ] || (wget https://www.mpich.org/static/downloads/4.3.2/mpich-4.3.2.tar.gz && tar xzf mpich-4.3.2.tar.gz)
+cd mpich-4.3.2
+make distclean 2>/dev/null || true
+
+./configure --prefix=/usr/local/mpich-4.3.2 \
+  --disable-fortran \
+  --with-device=ch3:sock
+
+make -j$(nproc)
+sudo make install
+
+echo 'export PATH=/usr/local/mpich-4.3.2/bin:$PATH' >> ~/.bashrc
+echo 'export LD_LIBRARY_PATH=/usr/local/mpich-4.3.2/lib:$LD_LIBRARY_PATH' >> ~/.bashrc
+source ~/.bashrc
+
+echo '/usr/local/mpich-4.3.2/lib' | sudo tee /etc/ld.so.conf.d/mpich-4.3.2.conf
+sudo ldconfig
+
+which mpiexec
+mpiexec -n 1 bash -lc 'echo OK on $(uname -m)'
 ```
 
 ---
 
-### 🔸 En el nodo *Master* (controlador)
+## 3) Configura **SSH sin contraseña** (desde el *launcher* hacia todos)
 
-Instala el cliente SSH:
+> El *launcher* puede ser el Pi o un PC; elige uno y realiza estos pasos **solo allí**.
 
-```bash
-sudo apt install openssh-client -y
+1. **Genera llave (si no existe)**:
+
+   ```bash
+   [ -f ~/.ssh/id_ed25519 ] || ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519
+   ```
+
+2. **Instala la llave pública en cada nodo (usa tus nombres o IPs)**:
+
+   ```bash
+   ssh-copy-id -i ~/.ssh/id_ed25519.pub adriel@raspberrypi
+   ssh-copy-id -i ~/.ssh/id_ed25519.pub adriel@slave1
+   ssh-copy-id -i ~/.ssh/id_ed25519.pub adriel@slave2
+   ```
+
+3. **Permisos correctos remotos (por si acaso)**:
+
+   ```bash
+   ssh adriel@raspberrypi 'chmod 700 ~/.ssh; chmod 600 ~/.ssh/authorized_keys'
+   ssh adriel@slave1     'chmod 700 ~/.ssh; chmod 600 ~/.ssh/authorized_keys'
+   ssh adriel@slave2     'chmod 700 ~/.ssh; chmod 600 ~/.ssh/authorized_keys'
+   ```
+
+4. **Prueba sin password**:
+
+   ```bash
+   ssh -o BatchMode=yes adriel@raspberrypi 'true' && echo OK_PI
+   ssh -o BatchMode=yes adriel@slave1     'true' && echo OK_S1
+   ssh -o BatchMode=yes adriel@slave2     'true' && echo OK_S2
+   ```
+
+---
+
+## 4) Crea el **hostfile de Hydra** (solo en el *launcher*)
+
+1. **Edita con `nano`**:
+
+   ```bash
+   nano ~/.mpi_hostfile
+   ```
+2. **Contenido (formato Hydra = `host:PPN`)**:
+
+   ```
+   192.168.18.10:2
+   192.168.18.241:2
+   ```
+3. **(Opcional) Exporta variable para no pasar `-f`**:
+
+   ```bash
+   echo 'export HYDRA_HOST_FILE=~/.mpi_hostfile' >> ~/.bashrc
+   source ~/.bashrc
+   ```
+   
+---
+
+## 5) Prepara el código y compila (misma ruta en todos)
+
+1. **Crea/asegura la ruta** en **cada nodo**:
+
+   ```bash
+   mkdir -p ~/Documents/Proyecto2-SO/ClusterSystem
+   ```
+
+2. **Coloca `ejemplo.c`** en esa ruta en **todos** los nodos.
+
+3. **Compila con ESTE MPICH en todos**:
+
+   ```bash
+   cd ~/Documents/Proyecto2-SO/ClusterSystem
+   /usr/local/mpich-4.3.2/bin/mpicc ejemplo.c -o ejemplo
+   ```
+
+---
+
+## 6) Ejecuta el clúster
+
+* **Evita X11**:
+
+  ```bash
+  unset DISPLAY
+  ```
+
+* **Con la variable `HYDRA_HOST_FILE`**:
+
+  ```bash
+  mpiexec -n 4 -env DISPLAY "" ./ejemplo
+  ```
+
+* **O pasando el hostfile explícito**:
+
+  ```bash
+  mpiexec -f ~/.mpi_hostfile -n 4 -env DISPLAY "" ./ejemplo
+  ```
+
+* **Si necesitas fijar interfaz/IP del launcher** (ruteo estricto):
+
+  ```bash
+  mpiexec -iface 192.168.18.242 -f ~/.mpi_hostfile -n 4 -env DISPLAY "" ./ejemplo
+  ```
+
+**Salida esperada:**
+
+```
+Hola desde el proceso 0 de 4
+Hola desde el proceso 1 de 4
+Hola desde el proceso 2 de 4
+Hola desde el proceso 3 de 4
 ```
 
 ---
 
-## 🌐 Paso 3. Obtener las direcciones IP de cada nodo
-
-Para ver la IP local de cada máquina:
+## 7) Verificaciones rápidas (cuando algo no corre)
 
 ```bash
-hostname -I
+# SSH sin password hacia cada host
+ssh -o BatchMode=yes adriel@192.168.18.10  'true' && echo OK1 || echo FAIL1
+ssh -o BatchMode=yes adriel@192.168.18.241 'true' && echo OK2 || echo FAIL2
+
+# MPICH presente en remotos
+ssh adriel@192.168.18.10  'bash -lc "which mpiexec && echo LD=$LD_LIBRARY_PATH"'
+ssh adriel@192.168.18.241 'bash -lc "which mpiexec && echo LD=$LD_LIBRARY_PATH"'
+
+# Binario en misma ruta
+ssh adriel@192.168.18.10  'bash -lc "ls -l ./ejemplo"'
+ssh adriel@192.168.18.241 'bash -lc "ls -l ./ejemplo"'
 ```
-
-Si el comando no existe, instala las herramientas de red:
-
-```bash
-sudo apt install net-tools -y
-```
-
-Luego edita el archivo `/etc/hosts` en **todos los nodos** para mapear las direcciones IP:
-
-```bash
-sudo nano /etc/hosts
-```
-
-Ejemplo de configuración:
-
-```
-192.168.18.242  master
-192.168.18.10   slave1
-192.168.18.241  slave2
-```
-
-Guarda con **Ctrl+O** y cierra con **Ctrl+X**.
-
-> ⚠️ Es importante que los nombres aquí definidos coincidan con los que usaremos en el archivo de hosts MPI.
 
 ---
 
-## 🔑 Paso 4. Generar y distribuir claves SSH (para conexión sin contraseña)
-
-Desde el **nodo Master**, genera una clave RSA sin contraseña:
-
-```bash
-ssh-keygen -t rsa -b 4096 -N "" -f ~/.ssh/id_rsa
-```
-
-Esto crea los archivos:
-
-* `~/.ssh/id_rsa` → clave privada
-* `~/.ssh/id_rsa.pub` → clave pública
-
-Luego, copia la clave pública a los nodos *Slave* (reemplaza `usuario` por tu nombre real):
-
-```bash
-scp ~/.ssh/id_rsa.pub usuario@192.168.18.10:~/.ssh/authorized_keys
-scp ~/.ssh/id_rsa.pub usuario@192.168.18.241:~/.ssh/authorized_keys
-```
-
-En **cada nodo Slave**, ajusta los permisos:
-
-```bash
-chmod 700 ~/.ssh
-chmod 600 ~/.ssh/authorized_keys
-```
-
-✅ **Prueba la conexión:**
-
-Desde el Master:
-
-```bash
-ssh usuario@192.168.18.10
-ssh usuario@192.168.18.241
-```
-
-Si entras sin que te pida contraseña, la conexión SSH está correctamente configurada.
-
----
-
-## 🧾 Paso 5. Crear el archivo de configuración de nodos MPI
-
-Crea el archivo `~/.mpi_hostfile` en el **nodo Master**:
-
-```bash
-nano ~/.mpi_hostfile
-```
-
-Ejemplo de contenido:
-
-```
-localhost slots=2
-slave1 slots=2
-slave2 slots=2
-```
-
-Donde:
-
-* `localhost` → el propio nodo Master.
-* `slots` → número de procesos o núcleos que ese nodo puede usar.
-* `slave1`, `slave2` → nombres definidos en `/etc/hosts`.
-
-Guarda con **Ctrl+O** y cierra con **Ctrl+X**.
-
----
-
-## ⚙️ Paso 6. Preparar el código a ejecutar
-
-El programa a ejecutar (por ejemplo `ejemplo.c`) debe estar en **la misma ruta en todos los nodos**.
-
-Compila el programa en cada máquina:
-
-```bash
-mkdir -p ~/Documents
-cd Documents/
-git clone https://github.com/Adriel23456/Proyecto2-SO.git
-```
-
-```bash
-cd Documents/Proyecto2-SO/ClusterSystem
-mpicc ejemplo.c -o ejemplo
-```
-
-Esto generará un binario `./ejemplo` listo para ejecutar en paralelo.
-
----
-
-## 🚀 Paso 7. Ejecutar el programa desde el nodo Master
-
-Desde el Master:
-
-```bash
-mpirun -np 4 --hostfile ~/.mpi_hostfile ./ejemplo
-```
-
-Explicación:
-
-* `-np 4` → número total de procesos a ejecutar.
-* `--hostfile ~/.mpi_hostfile` → archivo con los nodos del clúster.
-* `./ejemplo` → programa compilado a ejecutar.
-
----
-
-## ✅ Verificación de funcionamiento
-
-Si la configuración fue correcta, deberías ver que los procesos se distribuyen entre el Master y los Slaves.
-Puedes comprobarlo con un programa de prueba como este:
+## 8) Programa de prueba mínimo
 
 ```c
 #include <mpi.h>
@@ -227,50 +270,12 @@ int main(int argc, char** argv) {
 }
 ```
 
-Compílalo y ejecútalo en el clúster.
-Deberías ver múltiples líneas con diferentes `world_rank`, indicando que el cómputo está distribuido.
+**Compila en cada nodo**:
+
+```bash
+/usr/local/mpich-4.3.2/bin/mpicc ejemplo.c -o ejemplo
+```
 
 ---
 
-## 🧰 Consejos finales
-
-* Asegúrate de que todos los nodos tengan **el mismo usuario** y **nombre de carpeta de trabajo**.
-* Revisa que las rutas en `/etc/hosts` sean idénticas en todos los equipos.
-* Puedes sincronizar carpetas con `rsync` o compartirlas por NFS si quieres mantener el mismo código centralizado.
-* Si hay errores de SSH, ejecuta con `mpirun -v` para modo detallado.
-
-
-COMANDOS DE EMERGENCIA:
-```bash
-cd ~
-wget https://www.mpich.org/static/downloads/4.3.2/mpich-4.3.2.tar.gz
-tar xzf mpich-4.3.2.tar.gz
-cd mpich-4.3.2
-
-# Soporte heterogéneo:
-./configure --prefix=/usr/local/mpich-4.3.2 --enable-heterogeneous
-make -j$(nproc)
-sudo make install
-
-# Exportar rutas (para tu usuario)
-echo 'export PATH=/usr/local/mpich-4.3.2/bin:$PATH' >> ~/.bashrc
-echo 'export LD_LIBRARY_PATH=/usr/local/mpich-4.3.2/lib:$LD_LIBRARY_PATH' >> ~/.bashrc
-source ~/.bashrc
-
-#Verifica en cada nodo:
-which mpiexec
-mpichversion | head -n 1  # (si está el tool)
-mpiexec -n 1 bash -lc 'echo OK on $(uname -m)'
-```
-
-
-
-
-
-cd ~/mpich-4.3.2 2>/dev/null || true
-make distclean 2>/dev/null || true
-cd ~
-sudo apt update
-sudo apt purge -y openmpi-bin openmpi-common libopenmpi* || true
-sudo apt autoremove -y
-sudo apt install -y build-essential wget
+**Con esto tienes el `.md` correcto, sin pasos innecesarios, usando `nano`, obteniendo IPs, conectando todo por SSH, instalando Hydra (MPICH 4.3.2) con heterogeneidad y ejecutando el clúster.**
