@@ -476,22 +476,3 @@ cd ~/Documents/Proyecto2-SO/ClusterSystem
 ---
 
 **Con esto tienes un clúster Beowulf heterogéneo completamente funcional y robusto, que tolera nodos caídos sin problemas.**
-
-
-
-
-
-
-
-
-# Desde el master hacia los slaves
-ping -c 2 192.168.18.10
-ping -c 2 192.168.18.241
-ping -c 2 raspberrypi  # Debe responder con tu IP del master
-
-# Desde los slaves hacia el master
-ssh adriel@192.168.18.10 'ping -c 2 192.168.18.242'
-ssh adriel@192.168.18.10 'ping -c 2 raspberrypi'
-
-ssh adriel@192.168.18.241 'ping -c 2 192.168.18.242'
-ssh adriel@192.168.18.241 'ping -c 2 raspberrypi'
