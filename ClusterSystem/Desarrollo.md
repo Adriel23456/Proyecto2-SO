@@ -78,11 +78,14 @@ ssh-keygen -t rsa -b 4096 -N "" -f ~/.ssh/id_rsa
 
 > 🔸 Usa `rsa` o `ed25519`
 
-Luego nos vamos a asegurar de que el nodo maestro este autorizado y para hacer esto, para esto el nodo maestro aplica estos comandos:
+Luego nos vamos a asegurar de que el nodo maestro este autorizado y para hacer esto, para esto el nodo maestro aplica estos comandos (cambiar adriel por el nombre de usuario principal del PC):
 scp ~/.ssh/id_rsa.pub adriel@192.168.18.10:~/.ssh/authorized_keys
 scp ~/.ssh/id_rsa.pub adriel@192.168.18.241:~/.ssh/authorized_keys
 
 
+LUego en cada slave tengo que ejecutar:
+chmod 700 ~/.ssh
+chmod 600 ~/.ssh/authorized_keys
 
 
 Luego, copia la clave pública del nodo maestro a cada nodo esclavo:
