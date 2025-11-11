@@ -1,6 +1,6 @@
 /***************************************************************************//**
 *  \file       tft_driver.c
-*  \details    TFT Display Driver with draw operations
+*  \details    TFT Display Driver with CVC file support
 *******************************************************************************/
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -9,21 +9,10 @@
 #include <linux/cdev.h>
 #include <linux/device.h>
 #include <linux/uaccess.h>
-#include <linux/ioctl.h>
 #include <linux/delay.h>
+#include <linux/slab.h>
+#include "tft_driver.h"
 
-// External functions from gpio_controller
-extern int gpio_controller_init(void);
-extern void gpio_controller_exit(void);
-extern void gpio_write_command(uint8_t cmd);
-extern void gpio_write_byte(uint8_t data);
-extern void gpio_reset_display(void);
-
-// Display dimensions (adjust for your display)
-#define LCD_WIDTH  240
-#define LCD_HEIGHT 320
-
-// Basic ILI9341 commands
 #define CMD_SWRESET   0x01
 #define CMD_SLPOUT    0x11
 #define CMD_DISPON    0x29
@@ -33,34 +22,31 @@ extern void gpio_reset_display(void);
 #define CMD_MADCTL    0x36
 #define CMD_COLMOD    0x3A
 
-// IOCTL commands
-#define TFT_IOCTL_RESET     _IO('T', 0)
-#define TFT_IOCTL_DRAW_CIRCLE _IO('T', 1)
+#define MAX_PIXELS_PER_WRITE 1024
 
 dev_t dev = 0;
 static struct class *dev_class;
 static struct cdev tft_cdev;
 
-// Function prototypes
 static int tft_open(struct inode *inode, struct file *file);
 static int tft_release(struct inode *inode, struct file *file);
+static ssize_t tft_write(struct file *filp, const char __user *buf, size_t len, loff_t *off);
 static long tft_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
 
 static struct file_operations fops = {
     .owner = THIS_MODULE,
     .open = tft_open,
     .release = tft_release,
+    .write = tft_write,
     .unlocked_ioctl = tft_ioctl,
 };
 
-// Write 16-bit color
 static void write_color(uint16_t color)
 {
     gpio_write_byte(color >> 8);
     gpio_write_byte(color & 0xFF);
 }
 
-// Set drawing window
 static void set_window(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1)
 {
     gpio_write_command(CMD_CASET);
@@ -78,7 +64,6 @@ static void set_window(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1)
     gpio_write_command(CMD_RAMWR);
 }
 
-// Fill screen with color
 static void fill_screen(uint16_t color)
 {
     uint32_t i;
@@ -88,25 +73,15 @@ static void fill_screen(uint16_t color)
     }
 }
 
-// Draw filled circle
-static void draw_circle(uint16_t x0, uint16_t y0, uint16_t r, uint16_t color)
+static void draw_pixel(uint16_t x, uint16_t y, uint16_t color)
 {
-    int16_t x, y;
-    for (y = -r; y <= r; y++) {
-        for (x = -r; x <= r; x++) {
-            if (x * x + y * y <= r * r) {
-                uint16_t px = x0 + x;
-                uint16_t py = y0 + y;
-                if (px < LCD_WIDTH && py < LCD_HEIGHT) {
-                    set_window(px, py, px, py);
-                    write_color(color);
-                }
-            }
-        }
-    }
+    if (x >= LCD_WIDTH || y >= LCD_HEIGHT)
+        return;
+    
+    set_window(x, y, x, y);
+    write_color(color);
 }
 
-// Initialize TFT display
 static void tft_init(void)
 {
     gpio_reset_display();
@@ -118,15 +93,15 @@ static void tft_init(void)
     msleep(120);
 
     gpio_write_command(CMD_COLMOD);
-    gpio_write_byte(0x55);  // 16-bit color
+    gpio_write_byte(0x55);
 
     gpio_write_command(CMD_MADCTL);
-    gpio_write_byte(0x48);  // RGB order
+    gpio_write_byte(0x48);
 
     gpio_write_command(CMD_DISPON);
     msleep(100);
 
-    fill_screen(0x0000);  // Clear to black
+    fill_screen(0x0000);
 
     pr_info("TFT Display initialized\n");
 }
@@ -143,6 +118,48 @@ static int tft_release(struct inode *inode, struct file *file)
     return 0;
 }
 
+static ssize_t tft_write(struct file *filp, const char __user *buf, size_t len, loff_t *off)
+{
+    struct pixel_data *pixels;
+    size_t num_pixels;
+    size_t i;
+    int ret = 0;
+
+    if (len % sizeof(struct pixel_data) != 0) {
+        pr_err("Invalid data size. Must be multiple of pixel_data struct\n");
+        return -EINVAL;
+    }
+
+    num_pixels = len / sizeof(struct pixel_data);
+    if (num_pixels > MAX_PIXELS_PER_WRITE) {
+        pr_warn("Too many pixels in one write. Processing first %d\n", MAX_PIXELS_PER_WRITE);
+        num_pixels = MAX_PIXELS_PER_WRITE;
+    }
+
+    pixels = kmalloc(num_pixels * sizeof(struct pixel_data), GFP_KERNEL);
+    if (!pixels) {
+        pr_err("Failed to allocate memory for pixels\n");
+        return -ENOMEM;
+    }
+
+    if (copy_from_user(pixels, buf, num_pixels * sizeof(struct pixel_data))) {
+        pr_err("Failed to copy pixel data from user\n");
+        ret = -EFAULT;
+        goto cleanup;
+    }
+
+    for (i = 0; i < num_pixels; i++) {
+        draw_pixel(pixels[i].x, pixels[i].y, pixels[i].color);
+    }
+
+    ret = num_pixels * sizeof(struct pixel_data);
+    pr_info("Drew %zu pixels\n", num_pixels);
+
+cleanup:
+    kfree(pixels);
+    return ret;
+}
+
 static long tft_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
     switch (cmd) {
@@ -151,10 +168,8 @@ static long tft_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
             tft_init();
             break;
 
-        case TFT_IOCTL_DRAW_CIRCLE:
-            pr_info("Drawing red circle\n");
-            fill_screen(0x0000);  // Black background
-            draw_circle(LCD_WIDTH / 2, LCD_HEIGHT / 2, 50, 0xF800);  // Red circle
+        case TFT_IOCTL_DRAW_IMAGE:
+            pr_info("Ready to receive image data via write()\n");
             break;
 
         default:
@@ -221,5 +236,5 @@ module_exit(tft_driver_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("System Driver");
-MODULE_DESCRIPTION("TFT Display Driver");
-MODULE_VERSION("1.0");
+MODULE_DESCRIPTION("TFT Display Driver with CVC support");
+MODULE_VERSION("2.0");

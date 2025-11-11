@@ -6,6 +6,7 @@
 #include <linux/module.h>
 #include <linux/gpio.h>
 #include <linux/delay.h>
+#include "tft_driver.h"
 
 // GPIO definitions (BCM + 512 offset)
 #define GPIO_RS    (25 + 512)
@@ -24,8 +25,7 @@ static int gpio_pins[] = {GPIO_RS, GPIO_WR, GPIO_RST, GPIO_D0, GPIO_D1,
                           GPIO_D2, GPIO_D3, GPIO_D4, GPIO_D5, GPIO_D6, GPIO_D7};
 static int num_gpios = sizeof(gpio_pins) / sizeof(gpio_pins[0]);
 
-// Write 8-bit data to parallel bus
-void gpio_write_data(uint8_t data)
+static void gpio_write_data(uint8_t data)
 {
     gpio_set_value(GPIO_D0, (data >> 0) & 0x01);
     gpio_set_value(GPIO_D1, (data >> 1) & 0x01);
@@ -37,10 +37,9 @@ void gpio_write_data(uint8_t data)
     gpio_set_value(GPIO_D7, (data >> 7) & 0x01);
 }
 
-// Write command to TFT
 void gpio_write_command(uint8_t cmd)
 {
-    gpio_set_value(GPIO_RS, 0);  // Command mode
+    gpio_set_value(GPIO_RS, 0);
     gpio_write_data(cmd);
     gpio_set_value(GPIO_WR, 0);
     udelay(1);
@@ -48,10 +47,9 @@ void gpio_write_command(uint8_t cmd)
     udelay(1);
 }
 
-// Write data to TFT
 void gpio_write_byte(uint8_t data)
 {
-    gpio_set_value(GPIO_RS, 1);  // Data mode
+    gpio_set_value(GPIO_RS, 1);
     gpio_write_data(data);
     gpio_set_value(GPIO_WR, 0);
     udelay(1);
@@ -59,7 +57,6 @@ void gpio_write_byte(uint8_t data)
     udelay(1);
 }
 
-// Hardware reset
 void gpio_reset_display(void)
 {
     gpio_set_value(GPIO_RST, 1);
@@ -70,7 +67,6 @@ void gpio_reset_display(void)
     msleep(100);
 }
 
-// Initialize all GPIOs
 int gpio_controller_init(void)
 {
     int i, ret;
@@ -84,7 +80,6 @@ int gpio_controller_init(void)
         gpio_direction_output(gpio_pins[i], 0);
     }
     
-    // Set initial states
     gpio_set_value(GPIO_WR, 1);
     gpio_set_value(GPIO_RS, 1);
     gpio_set_value(GPIO_RST, 1);
