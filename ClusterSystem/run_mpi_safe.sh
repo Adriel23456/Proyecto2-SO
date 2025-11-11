@@ -113,7 +113,7 @@ echo -e "\n${GREEN}Ejecutando:${NC} mpiexec -n $NPROCS (slots=$available_slots) 
 MPIEXEC="/usr/local/mpich-4.3.2/bin/mpiexec"
 CMD=( "$MPIEXEC" -bootstrap ssh -f "$TEMP_HOSTFILE" -n "$NPROCS"
       -genvlist PATH,LD_LIBRARY_PATH
-      -env DISPLAY "" -print-rank-map -prepend-rank )
+      -env DISPLAY "" -l )
 
 # iface opcional
 if [[ -n "$IFACE" ]]; then

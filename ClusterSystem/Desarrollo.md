@@ -476,3 +476,13 @@ cd ~/Documents/Proyecto2-SO/ClusterSystem
 ---
 
 **Con esto tienes un clúster Beowulf heterogéneo completamente funcional y robusto, que tolera nodos caídos sin problemas.**
+
+
+
+
+
+
+
+
+echo '/usr/local/mpich-4.3.2/lib' | sudo tee /etc/ld.so.conf.d/mpich-4.3.2.conf
+sudo ldconfig
