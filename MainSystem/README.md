@@ -3,7 +3,9 @@ Se aplica:
 TODOS:
 -----------------------
 cd ~/Documents/Proyecto2-SO
-git pull origin master
+git fetch --all
+git reset --hard origin/master
+git clean -fd
 -----------------------
 
 Slaves:

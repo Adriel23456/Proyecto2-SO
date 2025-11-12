@@ -11,8 +11,11 @@ ORIGINAL_HOSTFILE="${HYDRA_HOST_FILE:-$HOME/.mpi_hostfile}"
 TEMP_HOSTFILE="/tmp/.mpi_hostfile_available"
 FINAL_HOSTFILE="/tmp/.mpi_hostfile_final"
 TIMEOUT=3
-IFACE=""
+IFACE=""            # Puede ser una IP o nombre de interfaz. Si está vacío, se autodetecta.
 IMAGE_FILE=""
+
+# Si pones DEBUG_KEEP_HOSTFILES=1, no borraremos los archivos temporales.
+DEBUG_KEEP_HOSTFILES="${DEBUG_KEEP_HOSTFILES:-0}"
 
 # ===== Colores =====
 RED='\033[0;31m'
@@ -28,17 +31,18 @@ show_help() {
     echo -e "${BLUE}  Sistema de Procesamiento Distribuido de Imágenes${NC}"
     echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
     echo ""
-    echo "Uso: $0 <imagen.png> [-t TIMEOUT] [-i IFACE]"
+    echo "Uso: $0 <imagen.png> [-t TIMEOUT] [-i IFACE|IP]"
     echo ""
     echo "Parámetros:"
     echo "  <imagen.png>  - Ruta de la imagen a procesar (requerido)"
     echo "  -t TIMEOUT    - Timeout para verificar slaves (default: 3)"
-    echo "  -i IFACE      - Interfaz de red a usar (opcional)"
+    echo "  -i IFACE|IP   - Interfaz o IP local a usar (opcional)."
     echo ""
     echo "Ejemplos:"
     echo "  $0 image.png"
     echo "  $0 ~/Pictures/photo.png -t 5"
     echo "  $0 image.png -i 192.168.18.242"
+    echo "  $0 image.png -i eth0"
     echo ""
     echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
     echo ""
@@ -157,16 +161,57 @@ if [ "$available_hosts" -eq 0 ]; then
     exit 1
 fi
 
-# ===== Construir hostfile final: rank 0 SIEMPRE en localhost =====
-# Colocamos 'localhost:1' como primera línea para asegurar master local.
+# ===== Resolver IP del master a anunciar (NADA de 'localhost') =====
+resolve_iface_ip() {
+    local ifname="$1"
+    # Si es una IP válida, la devolvemos tal cual
+    if [[ "$ifname" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+        echo "$ifname"
+        return 0
+    fi
+    # Si es nombre de interfaz, obtenemos su IP v4
+    if ip -o -4 addr show "$ifname" >/dev/null 2>&1; then
+        ip -o -4 addr show "$ifname" | awk '{print $4}' | cut -d/ -f1 | head -n1
+        return 0
+    fi
+    echo ""
+    return 1
+}
+
+MASTER_IP=""
+if [[ -n "$IFACE" ]]; then
+    MASTER_IP="$(resolve_iface_ip "$IFACE")"
+fi
+
+# Autodetectar IP local en la misma ruta hacia el primer host remoto
+if [[ -z "$MASTER_IP" ]]; then
+    first_remote_host="$(head -n1 "$TEMP_HOSTFILE" | cut -d: -f1)"
+    # Intentar obtener IP de salida hacia ese host
+    MASTER_IP="$(ip route get "$first_remote_host" 2>/dev/null | awk '/src/ {for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}')"
+fi
+
+# Fallback: primera IP de hostname -I
+if [[ -z "$MASTER_IP" ]]; then
+    MASTER_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+fi
+
+# Último Fallback: 127.0.0.1 (no recomendable, pero evitamos vacío)
+if [[ -z "$MASTER_IP" ]]; then
+    MASTER_IP="127.0.0.1"
+fi
+
+echo -e "${YELLOW}Master IP anunciada:${NC} $MASTER_IP"
+echo ""
+
+# ===== Construir hostfile final: PRIMERA LÍNEA = IP del master =====
 {
-    echo "localhost:1"
+    echo "${MASTER_IP}:1"
     cat "$TEMP_HOSTFILE"
 } > "$FINAL_HOSTFILE"
 
-total_slots=$((available_slots + 1))   # +1 por el master local (localhost)
+total_slots=$((available_slots + 1))   # +1 por el master
 echo -e "${YELLOW}Asignación final:${NC}"
-echo "  Master (rank 0)     : localhost (1 slot reservado)"
+echo "  Master (rank 0)     : ${MASTER_IP} (1 slot reservado)"
 echo "  Slaves (remotos)    : $available_slots slot(s)"
 echo "  Slots totales       : $total_slots"
 echo ""
@@ -182,11 +227,9 @@ CMD=( "$MPIEXEC"
       -f "$FINAL_HOSTFILE"
       -n "$total_slots"
       -genvlist PATH,LD_LIBRARY_PATH
-      -env DISPLAY "" )
-
-if [[ -n "$IFACE" ]]; then
-    CMD+=( -iface "$IFACE" )
-fi
+      -env DISPLAY ""
+      -print-all-exitcodes
+      -iface "$MASTER_IP" )
 
 echo -e "${GREEN}═══════════════════════════════════════════════════════════${NC}"
 echo -e "${GREEN}  Ejecutando procesamiento distribuido...${NC}"
@@ -201,7 +244,11 @@ echo ""
 EXIT_CODE=$?
 
 # Limpieza
-rm -f "$TEMP_HOSTFILE" "$FINAL_HOSTFILE"
+if [ "$DEBUG_KEEP_HOSTFILES" -ne 1 ]; then
+    rm -f "$TEMP_HOSTFILE" "$FINAL_HOSTFILE"
+else
+    echo -e "${YELLOW}[DEBUG] Conservando hostfiles:${NC} $TEMP_HOSTFILE  $FINAL_HOSTFILE"
+fi
 
 echo ""
 if [ $EXIT_CODE -eq 0 ]; then
