@@ -36,13 +36,13 @@ show_help() {
     echo "Parámetros:"
     echo "  <imagen.png>  - Ruta de la imagen a procesar (requerido)"
     echo "  -t TIMEOUT    - Timeout para verificar slaves (default: 3)"
-    echo "  -i IFACE|IP   - Interfaz o IP local a usar (opcional)."
+    echo "  -i IFACE|IP   - Interfaz (eth0/wlan0/...) o IP local a usar (opcional)"
     echo ""
     echo "Ejemplos:"
     echo "  $0 image.png"
     echo "  $0 ~/Pictures/photo.png -t 5"
     echo "  $0 image.png -i 192.168.18.242"
-    echo "  $0 image.png -i eth0"
+    echo "  $0 image.png -i wlan0"
     echo ""
     echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
     echo ""
@@ -161,45 +161,61 @@ if [ "$available_hosts" -eq 0 ]; then
     exit 1
 fi
 
-# ===== Resolver IP del master a anunciar (NADA de 'localhost') =====
-resolve_iface_ip() {
-    local ifname="$1"
-    # Si es una IP válida, la devolvemos tal cual
-    if [[ "$ifname" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
-        echo "$ifname"
+# ===== Resolver INTERFAZ y IP del master (para anunciar) =====
+# Dado IFACE (opcional), detectamos NOMBRE de interfaz y su IP.
+resolve_iface_and_ip() {
+    local hint="$1"
+    local first_remote="$2"
+
+    local ifname=""
+    local ipaddr=""
+
+    # Si hint es nombre de interfaz válido, úsalo
+    if [[ -n "$hint" ]] && ip -o -4 addr show "$hint" >/dev/null 2>&1; then
+        ifname="$hint"
+        ipaddr="$(ip -o -4 addr show "$ifname" | awk '{print $4}' | cut -d/ -f1 | head -n1)"
+        echo "$ifname;$ipaddr"
         return 0
     fi
-    # Si es nombre de interfaz, obtenemos su IP v4
-    if ip -o -4 addr show "$ifname" >/dev/null 2>&1; then
-        ip -o -4 addr show "$ifname" | awk '{print $4}' | cut -d/ -f1 | head -n1
-        return 0
+
+    # Si hint parece IP, busca interfaz que tenga esa IP
+    if [[ "$hint" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+        ifname="$(ip -o -4 addr | awk -v ip="$hint" '$4 ~ ip"/"{print $2; exit}')"
+        if [[ -n "$ifname" ]]; then
+            ipaddr="$hint"
+            echo "$ifname;$ipaddr"
+            return 0
+        fi
     fi
-    echo ""
-    return 1
+
+    # Autodetectar interfaz hacia el primer host remoto
+    if [[ -n "$first_remote" ]]; then
+        ifname="$(ip route get "$first_remote" 2>/dev/null | awk '/ dev / {for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')"
+        ipaddr="$(ip route get "$first_remote" 2>/dev/null | awk '/ src / {for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}')"
+        if [[ -n "$ifname" && -n "$ipaddr" ]]; then
+            echo "$ifname;$ipaddr"
+            return 0
+        fi
+    fi
+
+    # Fallback: primera interfaz con IP privada
+    ifname="$(ip -o -4 addr | awk '$4 ~ /^10\.|^172\.(1[6-9]|2[0-9]|3[0-1])\.|^192\.168\./ {print $2; exit}')"
+    ipaddr="$(ip -o -4 addr show "$ifname" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1)"
+
+    # Último fallback: loopback (no ideal, pero evita vacío)
+    if [[ -z "$ifname" || -z "$ipaddr" ]]; then
+        ifname="lo"
+        ipaddr="127.0.0.1"
+    fi
+
+    echo "$ifname;$ipaddr"
+    return 0
 }
 
-MASTER_IP=""
-if [[ -n "$IFACE" ]]; then
-    MASTER_IP="$(resolve_iface_ip "$IFACE")"
-fi
+first_remote_host="$(head -n1 "$TEMP_HOSTFILE" | cut -d: -f1)"
+IFS=';' read -r MASTER_IFACE_NAME MASTER_IP <<< "$(resolve_iface_and_ip "$IFACE" "$first_remote_host")"
 
-# Autodetectar IP local en la misma ruta hacia el primer host remoto
-if [[ -z "$MASTER_IP" ]]; then
-    first_remote_host="$(head -n1 "$TEMP_HOSTFILE" | cut -d: -f1)"
-    # Intentar obtener IP de salida hacia ese host
-    MASTER_IP="$(ip route get "$first_remote_host" 2>/dev/null | awk '/src/ {for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}')"
-fi
-
-# Fallback: primera IP de hostname -I
-if [[ -z "$MASTER_IP" ]]; then
-    MASTER_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
-fi
-
-# Último Fallback: 127.0.0.1 (no recomendable, pero evitamos vacío)
-if [[ -z "$MASTER_IP" ]]; then
-    MASTER_IP="127.0.0.1"
-fi
-
+echo -e "${YELLOW}Master IFACE:${NC} $MASTER_IFACE_NAME"
 echo -e "${YELLOW}Master IP anunciada:${NC} $MASTER_IP"
 echo ""
 
@@ -222,14 +238,18 @@ echo ""
 # ===== Ejecutar MPI =====
 MPIEXEC="/usr/local/mpich-4.3.2/bin/mpiexec"
 
+# Exportar también como var de entorno por si Hydra lo respeta mejor
+export HYDRA_IFACE="$MASTER_IFACE_NAME"
+export MPICH_INTERFACE_HOSTNAME="$MASTER_IP"
+
 CMD=( "$MPIEXEC"
       -bootstrap ssh
       -f "$FINAL_HOSTFILE"
       -n "$total_slots"
-      -genvlist PATH,LD_LIBRARY_PATH
+      -genvlist PATH,LD_LIBRARY_PATH,HYDRA_IFACE,MPICH_INTERFACE_HOSTNAME
       -env DISPLAY ""
       -print-all-exitcodes
-      -iface "$MASTER_IP" )
+      -iface "$MASTER_IFACE_NAME" )
 
 echo -e "${GREEN}═══════════════════════════════════════════════════════════${NC}"
 echo -e "${GREEN}  Ejecutando procesamiento distribuido...${NC}"
