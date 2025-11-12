@@ -1,125 +1,116 @@
 # ===========================================================================
-# Makefile para Master - Sistema de Procesamiento Distribuido de Imágenes
+# Makefile MASTER - Sistema de Procesamiento Distribuido de Imágenes
 # ===========================================================================
 
-# Compilador y flags
-CC = /usr/local/mpich-4.3.2/bin/mpicc
-CFLAGS = -Wall -Wextra -O2 -std=c99
-LDFLAGS = -lm
+# ====== Config MPICH (ajustable) ===========================================
+MPICH_ROOT ?= /usr/local/mpich-4.3.2
+MPICC      := $(MPICH_ROOT)/bin/mpicc
+RPATH_FLAG := -Wl,-rpath,$(MPICH_ROOT)/lib
 
-# Directorios
-SRC_DIR = .
-BUILD_DIR = .
-OUTPUT_DIR = $(HOME)/Documents/Proyecto2-SO/MainSystem
+# ====== Flags de compilación/enlace ========================================
+CSTD   ?= c99
+OPT    ?= -O2
+WARN   ?= -Wall -Wextra
+DEFS   ?= -DMASTER_BUILD
 
-# Nombre del ejecutable (debe estar en MainSystem para que coincida con slaves)
-TARGET = $(OUTPUT_DIR)/main
+CFLAGS := $(WARN) $(OPT) -std=$(CSTD) $(DEFS)
+LDFLAGS := $(RPATH_FLAG) -lm
 
-# Archivos fuente
-SOURCES = main.c \
-          image_utils.c \
-          mpi_comm.c \
-          histogram.c
+# ====== Directorios / Salida ===============================================
+SRC_DIR    := .
+BUILD_DIR  := .
+OUTPUT_DIR := $(HOME)/Documents/Proyecto2-SO/MainSystem
+TARGET     := $(OUTPUT_DIR)/main
 
-# Archivos objeto
-OBJECTS = $(SOURCES:.c=.o)
+# ====== Fuentes del MASTER ==================================================
+# Ajusta esta lista si renombraste/añadiste archivos.
+SOURCES := \
+  main.c \
+  image_utils.c \
+  mpi_comm.c \
+  histogram.c
 
-# Headers
-HEADERS = config.h \
-          image_utils.h \
-          mpi_comm.h \
-          histogram.h \
-          stb_image.h \
-          stb_image_write.h
+OBJECTS := $(SOURCES:.c=.o)
+
+# ====== Headers (para dependencias) ========================================
+HEADERS := \
+  config.h \
+  image_utils.h \
+  mpi_comm.h \
+  histogram.h \
+  stb_image.h \
+  stb_image_write.h
 
 # ===========================================================================
 # Reglas principales
 # ===========================================================================
-
-.PHONY: all clean run help check-libs
+.PHONY: all clean help check-libs where verify
 
 all: check-libs $(TARGET)
 
-# Compilar el ejecutable
 $(TARGET): $(OBJECTS)
 	@echo "═══════════════════════════════════════════════════════════"
-	@echo "  Enlazando ejecutable..."
+	@echo "  [MASTER] Enlazando ejecutable..."
 	@echo "═══════════════════════════════════════════════════════════"
 	@mkdir -p $(OUTPUT_DIR)
-	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+	$(MPICC) -o $@ $^ $(LDFLAGS)
 	@echo ""
-	@echo "✓ Compilación exitosa!"
-	@echo "✓ Ejecutable creado en: $(TARGET)"
+	@echo "✓ MASTER compilado -> $(TARGET)"
 	@echo ""
 
-# Compilar archivos objeto
+# ---- Compilación genérica
 %.o: %.c $(HEADERS)
 	@echo "Compilando: $<"
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(MPICC) $(CFLAGS) -c $< -o $@
 
-# Verificar que las librerías stb estén disponibles
+# ---- IMPORTANTE: Solo ESTE .o define stb_* (evita símbolos duplicados)
+# Si tus macros están DENTRO del .c, puedes borrar estas dos líneas.
+image_utils.o: CFLAGS += -DSTB_IMAGE_IMPLEMENTATION -DSTB_IMAGE_WRITE_IMPLEMENTATION
+
+# ---- Librerías de cabecera (stb) presentes
 check-libs:
-	@echo "Verificando librerías requeridas..."
+	@echo "Verificando librerías de cabecera (stb)..."
 	@if [ ! -f stb_image.h ]; then \
-		echo ""; \
 		echo "✗ ERROR: stb_image.h no encontrado"; \
-		echo ""; \
-		echo "Descárgalo con:"; \
 		echo "  wget https://raw.githubusercontent.com/nothings/stb/master/stb_image.h"; \
-		echo ""; \
 		exit 1; \
 	fi
 	@if [ ! -f stb_image_write.h ]; then \
-		echo ""; \
 		echo "✗ ERROR: stb_image_write.h no encontrado"; \
-		echo ""; \
-		echo "Descárgalo con:"; \
 		echo "  wget https://raw.githubusercontent.com/nothings/stb/master/stb_image_write.h"; \
-		echo ""; \
 		exit 1; \
 	fi
-	@echo "✓ Todas las librerías encontradas"
+	@echo "✓ stb headers OK"
 	@echo ""
 
-# Limpiar archivos compilados
+# ---- Utilidades
+where:
+	@echo "MPICH_ROOT  = $(MPICH_ROOT)"
+	@echo "MPICC       = $(MPICC)"
+	@echo "TARGET      = $(TARGET)"
+	@echo "RPATH_FLAG  = $(RPATH_FLAG)"
+
+verify: $(TARGET)
+	@echo "ldd del ejecutable:"
+	@ldd $(TARGET) | egrep 'libmpi|libz|libpng' || true
+
 clean:
-	@echo "Limpiando archivos objeto..."
-	rm -f $(OBJECTS)
+	@echo "Limpiando objetos..."
+	@rm -f $(OBJECTS)
 	@echo "Limpiando ejecutable..."
-	rm -f $(TARGET)
+	@rm -f $(TARGET)
 	@echo "✓ Limpieza completada"
 
-# Ejecutar (solo para pruebas locales, normalmente se usa run_mpi_safe.sh)
-run: $(TARGET)
-	@echo "Para ejecutar el programa, usa:"
-	@echo "  ./run_mpi_safe.sh"
-
-# Ayuda
 help:
 	@echo ""
 	@echo "═══════════════════════════════════════════════════════════"
-	@echo "  Makefile - Sistema de Procesamiento Distribuido"
+	@echo "  Makefile - MASTER"
 	@echo "═══════════════════════════════════════════════════════════"
+	@echo "make            -> Compila (con RPATH a MPICH)"
+	@echo "make clean      -> Limpia"
+	@echo "make where      -> Muestra rutas/flags"
+	@echo "make verify     -> Muestra dependencias con ldd"
 	@echo ""
-	@echo "Comandos disponibles:"
-	@echo "  make          - Compila el proyecto"
-	@echo "  make clean    - Limpia archivos compilados"
-	@echo "  make help     - Muestra esta ayuda"
-	@echo ""
-	@echo "Para ejecutar:"
-	@echo "  ./run_mpi_safe.sh"
-	@echo ""
-	@echo "Ubicación del ejecutable:"
+	@echo "Salida del binario:"
 	@echo "  $(TARGET)"
 	@echo ""
-	@echo "═══════════════════════════════════════════════════════════"
-	@echo ""
-
-# ===========================================================================
-# Dependencias explícitas
-# ===========================================================================
-
-main.o: main.c config.h image_utils.h mpi_comm.h histogram.h
-image_utils.o: image_utils.c image_utils.h config.h stb_image.h stb_image_write.h
-mpi_comm.o: mpi_comm.c mpi_comm.h config.h
-histogram.o: histogram.c histogram.h config.h stb_image_write.h
