@@ -7,6 +7,15 @@
 
 ## 0) Nombres e IPs coherentes (sin borrar nada especial)
 
+* **Mismo usuario** en todos los nodos (recomendado):
+
+```bash
+# si lo necesitas
+sudo adduser adriel
+sudo usermod -aG sudo adriel
+su - adriel
+```
+
 1. **Obtén la IP de cada nodo**:
 
    ```bash
@@ -52,15 +61,6 @@ sudo apt install -y openssh-server openssh-client
 sudo systemctl enable --now ssh
 sudo systemctl status ssh
 ```
-
-* **Mismo usuario** en todos los nodos (recomendado):
-
-  ```bash
-  # si lo necesitas
-  sudo adduser adriel
-  sudo usermod -aG sudo adriel
-  su - adriel
-  ```
 
 ---
 
@@ -138,6 +138,7 @@ mpiexec -n 1 bash -lc 'echo OK on $(uname -m)'
    ssh-copy-id -i ~/.ssh/id_ed25519.pub adriel@raspberrypi
    ssh-copy-id -i ~/.ssh/id_ed25519.pub adriel@slave1
    ssh-copy-id -i ~/.ssh/id_ed25519.pub adriel@slave2
+   ssh-copy-id -i ~/.ssh/id_ed25519.pub adriel@slave3
    ```
 
 3. **Permisos correctos remotos (por si acaso)**:
@@ -146,6 +147,7 @@ mpiexec -n 1 bash -lc 'echo OK on $(uname -m)'
    ssh adriel@raspberrypi 'chmod 700 ~/.ssh; chmod 600 ~/.ssh/authorized_keys'
    ssh adriel@slave1     'chmod 700 ~/.ssh; chmod 600 ~/.ssh/authorized_keys'
    ssh adriel@slave2     'chmod 700 ~/.ssh; chmod 600 ~/.ssh/authorized_keys'
+   ssh adriel@slave3     'chmod 700 ~/.ssh; chmod 600 ~/.ssh/authorized_keys'
    ```
 
 4. **Prueba sin password**:
@@ -154,6 +156,7 @@ mpiexec -n 1 bash -lc 'echo OK on $(uname -m)'
    ssh -o BatchMode=yes adriel@raspberrypi 'true' && echo OK_PI
    ssh -o BatchMode=yes adriel@slave1     'true' && echo OK_S1
    ssh -o BatchMode=yes adriel@slave2     'true' && echo OK_S2
+   ssh -o BatchMode=yes adriel@slave3     'true' && echo OK_S3
    ```
 
 ---
@@ -167,11 +170,15 @@ mpiexec -n 1 bash -lc 'echo OK on $(uname -m)'
    ```
 2. **Contenido (formato Hydra = `host:PPN`)**:
 
-   ```
-   192.168.18.10:2
-   192.168.18.241:2
-   192.168.18.99:2
-   192.168.18.50:2
+   ```                                              
+   192.168.18.10:1
+   #slave1
+
+   192.168.18.241:1
+   #slave2
+
+   192.168.18.90:1
+   #slave3
    ```
    
    > **Nota:** Puedes incluir **todos** los slaves potenciales del clúster, incluso si no están siempre encendidos. El script `mpirun-safe` (sección 6) detectará automáticamente cuáles están disponibles.
@@ -190,12 +197,11 @@ mpiexec -n 1 bash -lc 'echo OK on $(uname -m)'
 1. **Crea/asegura la ruta** en **cada nodo**:
 
    ```bash
-   mkdir -p ~/Documents/Proyecto2-SO/ClusterSystem
+   cd ~/Documents
+   git clone https://github.com/Adriel23456/Proyecto2-SO.git
    ```
 
-2. **Coloca `ejemplo.c`** en esa ruta en **todos** los nodos.
-
-3. **Compila con ESTE MPICH en todos**:
+2. **Compila con ESTE MPICH en todos**:
 
    ```bash
    cd ~/Documents/Proyecto2-SO/ClusterSystem
@@ -210,120 +216,7 @@ mpiexec -n 1 bash -lc 'echo OK on $(uname -m)'
 
 ### 6.1) Crea el script `run_mpi_safe.sh`
 
-```bash
-cd ~/Documents/Proyecto2-SO/ClusterSystem
-nano run_mpi_safe.sh
-```
-
-**Contenido completo del script:**
-
-```bash
-#!/bin/bash
-# Script: run_mpi_safe.sh
-# Descripción: Ejecuta MPI solo con los slaves disponibles
-
-# Colores para output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
-# Archivo de hosts original
-ORIGINAL_HOSTFILE=~/.mpi_hostfile
-TEMP_HOSTFILE=/tmp/.mpi_hostfile_available
-
-# Nombre del ejecutable (puedes cambiarlo)
-EXECUTABLE="./ejemplo"
-
-# Timeout para verificar conectividad (en segundos)
-TIMEOUT=3
-
-echo -e "${YELLOW}=== Sistema MPI Robusto ===${NC}"
-echo ""
-
-# Verificar que existe el hostfile original
-if [ ! -f "$ORIGINAL_HOSTFILE" ]; then
-    echo -e "${RED}ERROR: No se encuentra el archivo $ORIGINAL_HOSTFILE${NC}"
-    exit 1
-fi
-
-# Verificar que existe el ejecutable
-if [ ! -f "$EXECUTABLE" ]; then
-    echo -e "${RED}ERROR: No se encuentra el ejecutable $EXECUTABLE${NC}"
-    exit 1
-fi
-
-# Limpiar archivo temporal si existe
-> "$TEMP_HOSTFILE"
-
-echo -e "${YELLOW}Verificando disponibilidad de nodos...${NC}"
-echo ""
-
-available_count=0
-total_count=0
-
-# Leer cada línea del hostfile original
-# SOLUCIÓN: Usar descriptor de archivo 3 para evitar que SSH consuma stdin
-while IFS= read -r line <&3 || [ -n "$line" ]; do
-    # Ignorar líneas vacías o comentarios
-    [[ -z "$line" || "$line" =~ ^#.* ]] && continue
-    
-    # Extraer solo el hostname (en caso de que tenga formato "hostname:cores")
-    host=$(echo "$line" | cut -d':' -f1 | xargs)
-    
-    total_count=$((total_count + 1))
-    
-    echo -n "Verificando $host... "
-    
-    # SOLUCIÓN: Redirigir stdin de ssh a /dev/null para no consumir el bucle
-    ssh -o ConnectTimeout=$TIMEOUT -o BatchMode=yes -o StrictHostKeyChecking=no "$host" "exit" < /dev/null 2>/dev/null
-    
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}✓ DISPONIBLE${NC}"
-        echo "$line" >> "$TEMP_HOSTFILE"
-        available_count=$((available_count + 1))
-    else
-        echo -e "${RED}✗ NO DISPONIBLE${NC}"
-    fi
-done 3< "$ORIGINAL_HOSTFILE"
-
-echo ""
-echo -e "${YELLOW}Resumen:${NC}"
-echo "  Total de nodos configurados: $total_count"
-echo "  Nodos disponibles: $available_count"
-echo ""
-
-# Verificar que hay al menos un nodo disponible
-if [ $available_count -eq 0 ]; then
-    echo -e "${RED}ERROR: No hay slaves disponibles. No se puede ejecutar MPI.${NC}"
-    rm -f "$TEMP_HOSTFILE"
-    exit 1
-fi
-
-# Calcular número de procesos (puedes ajustar esta lógica)
-# Aquí asumo 1 proceso por nodo disponible
-NUM_PROCESSES=$available_count
-
-echo -e "${GREEN}Ejecutando MPI con $NUM_PROCESSES procesos en $available_count nodos...${NC}"
-echo ""
-
-# Ejecutar MPI con el hostfile de nodos disponibles
-mpiexec -n $NUM_PROCESSES -f "$TEMP_HOSTFILE" -env DISPLAY "" "$EXECUTABLE"
-
-EXIT_CODE=$?
-
-# Limpiar archivo temporal
-rm -f "$TEMP_HOSTFILE"
-
-echo ""
-if [ $EXIT_CODE -eq 0 ]; then
-    echo -e "${GREEN}✓ Ejecución completada exitosamente${NC}"
-else
-    echo -e "${RED}✗ Error en la ejecución (código: $EXIT_CODE)${NC}"
-fi
-
-exit $EXIT_CODE
-```
+Ya esta creado por el repositorio de github!
 
 ### 6.2) Instala el script globalmente
 
@@ -357,7 +250,6 @@ Verificando disponibilidad de nodos...
 Verificando 192.168.18.10... ✓ DISPONIBLE
 Verificando 192.168.18.241... ✓ DISPONIBLE
 Verificando 192.168.18.99... ✗ NO DISPONIBLE
-Verificando 192.168.18.50... ✗ NO DISPONIBLE
 
 Resumen:
   Total de nodos configurados: 4
@@ -385,12 +277,6 @@ Hola desde el proceso 1 de 2
 ## 7) Ejecuta el clúster (método tradicional)
 
 > **Nota:** Si instalaste `mpirun-safe` (sección 6), **úsalo siempre** en lugar de estos comandos. Los métodos a continuación funcionan pero **fallarán** si algún slave del hostfile está apagado.
-
-* **Evita X11**:
-
-  ```bash
-  unset DISPLAY
-  ```
 
 * **Con la variable `HYDRA_HOST_FILE`**:
 
@@ -439,24 +325,7 @@ ssh adriel@192.168.18.241 'bash -lc "ls -l ~/Documents/Proyecto2-SO/ClusterSyste
 
 ---
 
-## 9) Programa de prueba mínimo
-
-```c
-#include <mpi.h>
-#include <stdio.h>
-
-int main(int argc, char** argv) {
-    int world_size, world_rank;
-    MPI_Init(&argc, &argv);
-    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
-    MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
-    printf("Hola desde el proceso %d de %d\n", world_rank, world_size);
-    MPI_Finalize();
-    return 0;
-}
-```
-
-**Compila en cada nodo**:
+**Compilacion en cada nodo**:
 
 ```bash
 cd ~/Documents/Proyecto2-SO/ClusterSystem
