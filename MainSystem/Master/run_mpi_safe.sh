@@ -162,7 +162,6 @@ if [ "$available_hosts" -eq 0 ]; then
 fi
 
 # ===== Resolver INTERFAZ y IP del master (para anunciar) =====
-# Dado IFACE (opcional), detectamos NOMBRE de interfaz y su IP.
 resolve_iface_and_ip() {
     local hint="$1"
     local first_remote="$2"
@@ -238,18 +237,18 @@ echo ""
 # ===== Ejecutar MPI =====
 MPIEXEC="/usr/local/mpich-4.3.2/bin/mpiexec"
 
-# Exportar también como var de entorno por si Hydra lo respeta mejor
+# Muy importante:
+# - SOLO seteamos HYDRA_IFACE localmente (para el PMI del master).
+# - NO exportamos MPICH_INTERFACE_HOSTNAME a los slaves (evita conflicto de IP).
 export HYDRA_IFACE="$MASTER_IFACE_NAME"
-export MPICH_INTERFACE_HOSTNAME="$MASTER_IP"
 
 CMD=( "$MPIEXEC"
       -bootstrap ssh
       -f "$FINAL_HOSTFILE"
       -n "$total_slots"
-      -genvlist PATH,LD_LIBRARY_PATH,HYDRA_IFACE,MPICH_INTERFACE_HOSTNAME
+      -genvlist PATH,LD_LIBRARY_PATH
       -env DISPLAY ""
-      -print-all-exitcodes
-      -iface "$MASTER_IFACE_NAME" )
+      -print-all-exitcodes )
 
 echo -e "${GREEN}═══════════════════════════════════════════════════════════${NC}"
 echo -e "${GREEN}  Ejecutando procesamiento distribuido...${NC}"
@@ -258,6 +257,9 @@ echo ""
 echo "  Procesos totales: $total_slots (1 master local + $available_slots slaves)"
 echo "  Imagen: $IMAGE_FILE"
 echo ""
+
+# [Opcional de diagnóstico rápido] Descomenta para validar el hostfile:
+# "${CMD[@]}" /bin/hostname || { echo -e "${RED}Fallo precheck hostname${NC}"; exit 1; }
 
 # Ejecutar con la imagen como argumento
 "${CMD[@]}" "$EXECUTABLE" "$IMAGE_FILE"
