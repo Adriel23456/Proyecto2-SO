@@ -161,7 +161,7 @@ if [ "$available_hosts" -eq 0 ]; then
     exit 1
 fi
 
-# ===== Resolver INTERFAZ y IP del master (para anunciar) =====
+# ===== Resolver INTERFAZ y IP del master (solo informativo) =====
 resolve_iface_and_ip() {
     local hint="$1"
     local first_remote="$2"
@@ -201,7 +201,7 @@ resolve_iface_and_ip() {
     ifname="$(ip -o -4 addr | awk '$4 ~ /^10\.|^172\.(1[6-9]|2[0-9]|3[0-1])\.|^192\.168\./ {print $2; exit}')"
     ipaddr="$(ip -o -4 addr show "$ifname" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1)"
 
-    # Último fallback: loopback (no ideal, pero evita vacío)
+    # Último fallback: loopback
     if [[ -z "$ifname" || -z "$ipaddr" ]]; then
         ifname="lo"
         ipaddr="127.0.0.1"
@@ -237,17 +237,15 @@ echo ""
 # ===== Ejecutar MPI =====
 MPIEXEC="/usr/local/mpich-4.3.2/bin/mpiexec"
 
-# Muy importante:
-# - SOLO seteamos HYDRA_IFACE localmente (para el PMI del master).
-# - NO exportamos MPICH_INTERFACE_HOSTNAME a los slaves (evita conflicto de IP).
-export HYDRA_IFACE="$MASTER_IFACE_NAME"
+# Importante:
+# - NO seteamos HYDRA_IFACE aquí.
+# - NO pasamos -iface a mpiexec.
+# - Hydra elegirá la interfaz adecuada para cada proxy.
 
 CMD=( "$MPIEXEC"
       -bootstrap ssh
       -f "$FINAL_HOSTFILE"
       -n "$total_slots"
-      -genvlist PATH,LD_LIBRARY_PATH
-      -env DISPLAY ""
       -print-all-exitcodes )
 
 echo -e "${GREEN}═══════════════════════════════════════════════════════════${NC}"
