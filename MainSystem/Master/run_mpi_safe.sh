@@ -26,7 +26,7 @@ while getopts ":n:e:f:t:i:" opt; do
     t) TIMEOUT="$OPTARG" ;;
     i) IFACE="$OPTARG" ;;
     \?) echo "Uso: $0 [-n NPROCS] [-e EXEC] [-f HOSTFILE] [-t TIMEOUT] [-i IFACE]"; exit 1 ;;
-  end esac
+  esac
 done
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
@@ -54,9 +54,7 @@ fi
 # ===== Descubrir master =====
 MASTER_HOST="$(hostname -s)"
 MASTER_IP="$(ip -o -4 addr show | awk '/eth0|enp|eno|wlan0/ {sub(/\/.*/,"",$4); print $4; exit}')"
-if [[ -z "$MASTER_IP" ]]; then
-  MASTER_IP="127.0.0.1"
-fi
+if [[ -z "$MASTER_IP" ]]; then MASTER_IP="127.0.0.1"; fi
 
 echo -e "${YELLOW}Verificando disponibilidad de slaves...${NC}\n"
 
