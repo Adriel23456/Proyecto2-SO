@@ -72,52 +72,68 @@ sudo systemctl status ssh
 
 ```bash
 cd ~
-[ -d mpich-4.3.2 ] || (wget https://www.mpich.org/static/downloads/4.3.2/mpich-4.3.2.tar.gz && tar xzf mpich-4.3.2.tar.gz)
-cd mpich-4.3.2
+sudo apt update
+sudo apt install -y build-essential libhwloc-dev libevent-dev
+
+# Descargar y preparar Open MPI 4.1.6
+[ -d openmpi-4.1.6 ] || (wget https://download.open-mpi.org/release/open-mpi/v4.1/openmpi-4.1.6.tar.gz && tar xzf openmpi-4.1.6.tar.gz)
+cd openmpi-4.1.6
 make distclean 2>/dev/null || true
 
-./configure --prefix=/usr/local/mpich-4.3.2 \
-  --disable-fortran \
-  --with-device=ch3:sock
+# Compilar con soporte heterogéneo y prefijo aislado
+./configure --prefix=/opt/openmpi-4.1.6-hetero \
+            --enable-heterogeneous \
+            --enable-mpirun-prefix-by-default
 
 make -j$(nproc)
 sudo make install
 
-echo 'export PATH=/usr/local/mpich-4.3.2/bin:$PATH' >> ~/.bashrc
-echo 'export LD_LIBRARY_PATH=/usr/local/mpich-4.3.2/lib:$LD_LIBRARY_PATH' >> ~/.bashrc
+# Exportar rutas (puedes añadirlas al .bashrc si deseas)
+echo 'export PATH=/opt/openmpi-4.1.6-hetero/bin:$PATH' >> ~/.bashrc
+echo 'export LD_LIBRARY_PATH=/opt/openmpi-4.1.6-hetero/lib:$LD_LIBRARY_PATH' >> ~/.bashrc
 source ~/.bashrc
 
-echo '/usr/local/mpich-4.3.2/lib' | sudo tee /etc/ld.so.conf.d/mpich-4.3.2.conf
+# Registrar librerías y comprobar instalación
+echo '/opt/openmpi-4.1.6-hetero/lib' | sudo tee /etc/ld.so.conf.d/openmpi-4.1.6-hetero.conf
 sudo ldconfig
 
-which mpiexec
-mpiexec -n 1 bash -lc 'echo OK on $(uname -m)'
+which mpicc
+mpirun --version
+mpirun -n 1 bash -lc 'echo OK on $(uname -m)'
 ```
 
 ### Slaves x86_64 (PCs Ubuntu 64-bit)
 
 ```bash
 cd ~
-[ -d mpich-4.3.2 ] || (wget https://www.mpich.org/static/downloads/4.3.2/mpich-4.3.2.tar.gz && tar xzf mpich-4.3.2.tar.gz)
-cd mpich-4.3.2
+sudo apt update
+sudo apt install -y build-essential libhwloc-dev libevent-dev
+
+# Descargar y preparar Open MPI 4.1.6
+[ -d openmpi-4.1.6 ] || (wget https://download.open-mpi.org/release/open-mpi/v4.1/openmpi-4.1.6.tar.gz && tar xzf openmpi-4.1.6.tar.gz)
+cd openmpi-4.1.6
 make distclean 2>/dev/null || true
 
-./configure --prefix=/usr/local/mpich-4.3.2 \
-  --disable-fortran \
-  --with-device=ch3:sock
+# Compilar con soporte heterogéneo y prefijo idéntico al del Pi
+./configure --prefix=/opt/openmpi-4.1.6-hetero \
+            --enable-heterogeneous \
+            --enable-mpirun-prefix-by-default
 
 make -j$(nproc)
 sudo make install
 
-echo 'export PATH=/usr/local/mpich-4.3.2/bin:$PATH' >> ~/.bashrc
-echo 'export LD_LIBRARY_PATH=/usr/local/mpich-4.3.2/lib:$LD_LIBRARY_PATH' >> ~/.bashrc
+# Exportar rutas
+echo 'export PATH=/opt/openmpi-4.1.6-hetero/bin:$PATH' >> ~/.bashrc
+echo 'export LD_LIBRARY_PATH=/opt/openmpi-4.1.6-hetero/lib:$LD_LIBRARY_PATH' >> ~/.bashrc
 source ~/.bashrc
 
-echo '/usr/local/mpich-4.3.2/lib' | sudo tee /etc/ld.so.conf.d/mpich-4.3.2.conf
+# Registrar librerías y verificar
+echo '/opt/openmpi-4.1.6-hetero/lib' | sudo tee /etc/ld.so.conf.d/openmpi-4.1.6-hetero.conf
 sudo ldconfig
 
-which mpiexec
-mpiexec -n 1 bash -lc 'echo OK on $(uname -m)'
+which mpicc
+mpirun --version
+mpirun -n 1 bash -lc 'echo OK on $(uname -m)'
 ```
 
 ---
