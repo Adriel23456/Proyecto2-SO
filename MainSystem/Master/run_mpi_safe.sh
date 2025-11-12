@@ -9,6 +9,7 @@
 EXECUTABLE="$HOME/Documents/Proyecto2-SO/MainSystem/main"
 ORIGINAL_HOSTFILE="${HYDRA_HOST_FILE:-$HOME/.mpi_hostfile}"
 TEMP_HOSTFILE="/tmp/.mpi_hostfile_available"
+FINAL_HOSTFILE="/tmp/.mpi_hostfile_final"
 TIMEOUT=3
 IFACE=""
 IMAGE_FILE=""
@@ -83,7 +84,7 @@ if [ ! -f "$ORIGINAL_HOSTFILE" ]; then
 fi
 echo -e "${GREEN}✓${NC} Hostfile encontrado: $ORIGINAL_HOSTFILE"
 
-# Verificar ejecutable
+# Verificar ejecutable local
 if [ ! -f "$EXECUTABLE" ]; then
     echo -e "${RED}ERROR: No se encuentra el ejecutable: $EXECUTABLE${NC}"
     echo ""
@@ -96,7 +97,7 @@ echo -e "${GREEN}✓${NC} Ejecutable encontrado: $EXECUTABLE"
 
 echo ""
 
-# ===== Verificar disponibilidad de slaves =====
+# ===== Verificar disponibilidad de slaves remotos =====
 echo -e "${YELLOW}═══════════════════════════════════════════════════════════${NC}"
 echo -e "${YELLOW}  Verificando disponibilidad de slaves...${NC}"
 echo -e "${YELLOW}═══════════════════════════════════════════════════════════${NC}"
@@ -106,6 +107,9 @@ echo ""
 available_hosts=0
 available_slots=0
 configured_hosts=0
+
+# Limpiamos final por si quedó de una corrida anterior
+rm -f "$FINAL_HOSTFILE"
 
 while IFS= read -r raw <&3 || [ -n "$raw" ]; do
     line="$(echo "$raw" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
@@ -126,17 +130,22 @@ while IFS= read -r raw <&3 || [ -n "$raw" ]; do
 
     ssh -o ConnectTimeout=$TIMEOUT -o BatchMode=yes -o StrictHostKeyChecking=no "$host" "exit" < /dev/null 2>/dev/null
     if [ $? -eq 0 ]; then
-        echo -e "${GREEN}DISPONIBLE${NC}"
-        echo "${host}:${ppn}" >> "$TEMP_HOSTFILE"
-        available_hosts=$((available_hosts+1))
-        available_slots=$((available_slots+ppn))
+        # Verificar que el ejecutable exista en el remote (mismo path)
+        if ssh -o ConnectTimeout=$TIMEOUT -o BatchMode=yes -o StrictHostKeyChecking=no "$host" "[ -x '$EXECUTABLE' ]" < /dev/null 2>/dev/null; then
+            echo -e "${GREEN}DISPONIBLE${NC}"
+            echo "${host}:${ppn}" >> "$TEMP_HOSTFILE"
+            available_hosts=$((available_hosts+1))
+            available_slots=$((available_slots+ppn))
+        else
+            echo -e "${RED}EJECUTABLE NO ENCONTRADO${NC}"
+        fi
     else
         echo -e "${RED}NO DISPONIBLE${NC}"
     fi
 done 3< "$ORIGINAL_HOSTFILE"
 
 echo ""
-echo -e "${YELLOW}Resumen:${NC}"
+echo -e "${YELLOW}Resumen (remotos):${NC}"
 echo "  Hosts configurados : $configured_hosts"
 echo "  Hosts disponibles   : $available_hosts"
 echo "  Slots disponibles   : $available_slots"
@@ -148,19 +157,30 @@ if [ "$available_hosts" -eq 0 ]; then
     exit 1
 fi
 
+# ===== Construir hostfile final: rank 0 SIEMPRE en localhost =====
+# Colocamos 'localhost:1' como primera línea para asegurar master local.
+{
+    echo "localhost:1"
+    cat "$TEMP_HOSTFILE"
+} > "$FINAL_HOSTFILE"
+
+total_slots=$((available_slots + 1))   # +1 por el master local (localhost)
+echo -e "${YELLOW}Asignación final:${NC}"
+echo "  Master (rank 0)     : localhost (1 slot reservado)"
+echo "  Slaves (remotos)    : $available_slots slot(s)"
+echo "  Slots totales       : $total_slots"
+echo ""
+echo -e "${YELLOW}Hostfile efectivo (orden de mapeo de ranks):${NC}"
+nl -ba "$FINAL_HOSTFILE" | sed 's/^/  /'
+echo ""
+
 # ===== Ejecutar MPI =====
-NPROCS=$((available_slots + 1))  # +1 para el master
-
-echo -e "${GREEN}═══════════════════════════════════════════════════════════${NC}"
-echo -e "${GREEN}  Ejecutando procesamiento distribuido...${NC}"
-echo -e "${GREEN}═══════════════════════════════════════════════════════════${NC}"
-echo ""
-echo "  Procesos totales: $NPROCS (1 master + $available_slots slaves)"
-echo "  Imagen: $IMAGE_FILE"
-echo ""
-
 MPIEXEC="/usr/local/mpich-4.3.2/bin/mpiexec"
-CMD=( "$MPIEXEC" -bootstrap ssh -f "$TEMP_HOSTFILE" -n "$NPROCS"
+
+CMD=( "$MPIEXEC"
+      -bootstrap ssh
+      -f "$FINAL_HOSTFILE"
+      -n "$total_slots"
       -genvlist PATH,LD_LIBRARY_PATH
       -env DISPLAY "" )
 
@@ -168,12 +188,20 @@ if [[ -n "$IFACE" ]]; then
     CMD+=( -iface "$IFACE" )
 fi
 
+echo -e "${GREEN}═══════════════════════════════════════════════════════════${NC}"
+echo -e "${GREEN}  Ejecutando procesamiento distribuido...${NC}"
+echo -e "${GREEN}═══════════════════════════════════════════════════════════${NC}"
+echo ""
+echo "  Procesos totales: $total_slots (1 master local + $available_slots slaves)"
+echo "  Imagen: $IMAGE_FILE"
+echo ""
+
 # Ejecutar con la imagen como argumento
 "${CMD[@]}" "$EXECUTABLE" "$IMAGE_FILE"
 EXIT_CODE=$?
 
 # Limpieza
-rm -f "$TEMP_HOSTFILE"
+rm -f "$TEMP_HOSTFILE" "$FINAL_HOSTFILE"
 
 echo ""
 if [ $EXIT_CODE -eq 0 ]; then
