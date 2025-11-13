@@ -4,7 +4,7 @@
 
 # ===== Configuración =====
 EXECUTABLE="./ejemplo"
-HOSTFILE="${HOME}/.mpi_hostfile"
+HOSTFILE="$HOME/.mpi_hostfile"
 TEMP_HOSTFILE="/tmp/mpi_hostfile_available_$$"
 TIMEOUT=3
 MPI_PATH="/opt/openmpi-4.1.6"
@@ -92,7 +92,7 @@ total_slots=0
 configured_nodes=0
 
 # Leer hostfile y verificar cada nodo
-# (el "|| [[ -n $line ]]" es para que no se pierda la última línea si no termina en \n)
+# Usamos 'set -- $line' para partir la línea en tokens y buscar host + slots
 while IFS= read -r line || [[ -n "$line" ]]; do
     # Recortar espacios al inicio y final
     line="${line#"${line%%[![:space:]]*}"}"
@@ -103,21 +103,19 @@ while IFS= read -r line || [[ -n "$line" ]]; do
         continue
     fi
 
-    # Primer campo = host (IP o hostname)
-    host=$(awk '{print $1}' <<< "$line")
+    # Partir la línea en campos
+    set -- $line
+    host="$1"
+    slots="$DEFAULT_SLOTS"
 
-    # Buscar sólo el parámetro slots=N (ignorando max_slots)
-    slots=$(awk '{
-        for (i = 1; i <= NF; i++) {
-            if ($i ~ /^slots=[0-9]+$/) {
-                split($i,a,"=");
-                print a[2];
-                exit;
-            }
-        }
-    }' <<< "$line")
-
-    [ -z "$slots" ] && slots=$DEFAULT_SLOTS
+    # Buscar token slots=N
+    for tok in "$@"; do
+        case "$tok" in
+            slots=*)
+                slots="${tok#slots=}"
+                ;;
+        esac
+    done
 
     configured_nodes=$((configured_nodes + 1))
 
