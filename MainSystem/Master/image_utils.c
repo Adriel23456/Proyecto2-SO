@@ -198,47 +198,87 @@ GrayscaleImage* reconstruct_image(GrayscaleImage **sections,
                                    int width,
                                    int height) {
     printf("[MASTER] Reconstruyendo imagen completa (%dx%d)\n", width, height);
-    
+
     // Crear imagen completa
     GrayscaleImage *full_img = (GrayscaleImage*)malloc(sizeof(GrayscaleImage));
     if (!full_img) {
         return NULL;
     }
-    
+
     full_img->width = width;
     full_img->height = height;
     full_img->channels = 1;
-    
+
     full_img->data = (uint8_t*)malloc(width * height * sizeof(uint8_t));
     if (!full_img->data) {
         free(full_img);
         return NULL;
     }
-    
-    // Copiar cada sección a su posición correspondiente
+
+    // Inicializar por si acaso (no es estrictamente necesario)
+    memset(full_img->data, 0, width * height * sizeof(uint8_t));
+
+    // 1) Copiar cada sección a su posición correspondiente
     for (int i = 0; i < num_sections; i++) {
         if (!sections[i]) {
             fprintf(stderr, "[ERROR] Sección %d es NULL\n", i);
             continue;
         }
-        
+
         const SectionInfo *info = &section_infos[i];
-        
+
         printf("[MASTER]   Copiando sección %d (filas %d-%d)\n",
                i, info->start_row, info->start_row + info->num_rows - 1);
-        
+
         for (int row = 0; row < info->num_rows; row++) {
             int dst_row = info->start_row + row;
+            if (dst_row < 0 || dst_row >= height) {
+                continue;
+            }
+
             int dst_offset = dst_row * width;
             int src_offset = row * info->width;
-            
+
             memcpy(full_img->data + dst_offset,
                    sections[i]->data + src_offset,
                    info->width * sizeof(uint8_t));
         }
     }
-    
+
+    // 2) Corregir la línea negra entre secciones
+    //
+    //   Cada slave pone un borde de 1 píxel negro en la parte superior e
+    //   inferior de su sección. Eso hace que, al pegar las secciones, quede
+    //   una línea horizontal negra en la frontera.
+    //
+    //   Para cada frontera entre secciones i (arriba) y i+1 (abajo):
+    //     - fila_bottom = última fila de la sección i
+    //     - fila_top    = primera fila de la sección i+1
+    //   Reemplazamos ambas por sus vecinas interiores para “borrar” el borde.
+
+    for (int i = 0; i < num_sections - 1; i++) {
+        const SectionInfo *info_top    = &section_infos[i];
+        const SectionInfo *info_bottom = &section_infos[i + 1];
+
+        int bottom_row = info_top->start_row + info_top->num_rows - 1; // borde inferior de arriba
+        int top_row    = info_bottom->start_row;                        // borde superior de abajo
+
+        // Corregir borde inferior de la sección superior
+        if (bottom_row > 0 && bottom_row < height) {
+            memcpy(full_img->data + bottom_row * width,
+                   full_img->data + (bottom_row - 1) * width,
+                   width * sizeof(uint8_t));
+        }
+
+        // Corregir borde superior de la sección inferior
+        if (top_row >= 0 && top_row < height - 1) {
+            memcpy(full_img->data + top_row * width,
+                   full_img->data + (top_row + 1) * width,
+                   width * sizeof(uint8_t));
+        }
+    }
+
     printf("[MASTER] Reconstrucción completada\n");
-    
+
     return full_img;
 }
