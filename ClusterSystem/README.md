@@ -208,12 +208,12 @@ nano ~/.mpi_hostfile
 Contenido (ajusta IPs y slots según tu configuración):
 ```
 # Master (Raspberry Pi ARM7)
-192.168.18.242 slots=2 max_slots=4
+192.168.18.242 slots=2
 
 # Slaves x86_64
-192.168.18.10  slots=2 max_slots=4
-192.168.18.241 slots=2 max_slots=4
-192.168.18.90  slots=2 max_slots=4
+192.168.18.10  slots=2
+192.168.18.241 slots=2
+192.168.18.90  slots=2
 ```
 
 ---

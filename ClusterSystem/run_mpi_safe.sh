@@ -148,7 +148,6 @@ echo -e "${YELLOW}════════════════════�
 $MPI_PATH/bin/mpirun \
     --hostfile "$TEMP_HOSTFILE" \
     --np "$NPROCS" \
-    --hetero \
     --map-by node \
     --bind-to core \
     --report-bindings \
@@ -171,10 +170,3 @@ else
 fi
 
 exit $EXIT_CODE
-```
-
-### Hacer ejecutable y copiar globalmente:
-```bash
-chmod +x ~/mpi_cluster/run_mpi_safe.sh
-sudo cp ~/mpi_cluster/run_mpi_safe.sh /usr/local/bin/mpirun-safe
-sudo chmod +x /usr/local/bin/mpirun-safe
