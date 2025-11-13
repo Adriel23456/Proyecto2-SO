@@ -8,10 +8,10 @@ MPIRUN="/opt/openmpi-4.1.6/bin/mpirun"
 APP_DIR="$HOME/Documents/Proyecto2-SO/MainSystem"
 EXECUTABLE="$APP_DIR/main"
 
-# Hostfile que usará mpirun
-HOSTFILE="$HOME/.mpi_hostfile"
+# Hostfile original (solo para referencia, ya NO se pasa directo a mpirun)
+ORIGINAL_HOSTFILE="$HOME/.mpi_hostfile"
 
-# Hosts que queremos considerar (master + slaves)
+# Hosts candidatos (los que quieres usar en el cluster)
 HOSTS=(localhost slave1 slave2 slave3)
 
 # ===== Argumentos a pasar al main =====
@@ -29,7 +29,7 @@ echo "==========================================="
 echo
 echo "Directorio de la app : $APP_DIR"
 echo "Ejecutable           : $EXECUTABLE"
-echo "Hostfile             : $HOSTFILE"
+echo "Hostfile original    : $ORIGINAL_HOSTFILE (solo referencia)"
 echo "MPIRUN               : $MPIRUN"
 echo "Args para main       : ${EXTRA_ARGS[*]:-(ninguno)}"
 echo
@@ -45,51 +45,64 @@ if [ ! -f "$EXECUTABLE" ]; then
     exit 1
 fi
 
-if [ ! -f "$HOSTFILE" ]; then
-    echo -e "${RED}ERROR:${NC} no se encontró el hostfile: $HOSTFILE"
-    exit 1
+# El hostfile original es opcional ahora, pero si existe lo mostramos
+if [ ! -f "$ORIGINAL_HOSTFILE" ]; then
+    echo -e "${YELLOW}Aviso:${NC} no se encontró ~/.mpi_hostfile (no es crítico para este script)"
 fi
 
-# ===== Verificar nodos y ejecutable =====
-available_hosts=0
+# ===== Verificar nodos y construir hostfile filtrado =====
+TEMP_HOSTFILE=$(mktemp /tmp/mpi_hosts_XXXXXX)
+AVAILABLE_HOSTS=()
+available_count=0
+
 echo "▶ Verificando nodos y ejecutable:"
 for host in "${HOSTS[@]}"; do
     printf "  %s: " "$host"
     if ssh -o BatchMode=yes -o ConnectTimeout=3 "$host" "ls -l '$EXECUTABLE'" >/dev/null 2>&1; then
         echo -e "${GREEN}OK${NC}"
-        available_hosts=$((available_hosts + 1))
+        AVAILABLE_HOSTS+=("$host")
+        available_count=$((available_count + 1))
+        # 1 proceso por nodo → slots=1
+        echo "$host slots=1" >> "$TEMP_HOSTFILE"
     else
         echo -e "${YELLOW}No encontrado${NC}"
     fi
 done
 
 echo
-echo "Nodos disponibles con '$EXECUTABLE': $available_hosts"
+echo "Nodos disponibles con '$EXECUTABLE': $available_count"
 
-if [ "$available_hosts" -eq 0 ]; then
+if [ "$available_count" -eq 0 ]; then
     echo -e "${RED}ERROR:${NC} no hay nodos con el ejecutable disponible. Abortando."
+    rm -f "$TEMP_HOSTFILE"
     exit 1
 fi
 
 # ===== 1 proceso por nodo disponible =====
-NPROCS="$available_hosts"
+NPROCS="$available_count"
 echo "Procesos totales a lanzar (-np): $NPROCS"
+echo
+
+# Mostrar hostfile efectivo que SÍ usará mpirun
+echo -e "${YELLOW}Hostfile efectivo (filtrado):${NC}"
+nl -ba "$TEMP_HOSTFILE"
 echo
 
 # ===== Cambiar al directorio de la app =====
 cd "$APP_DIR" || {
     echo -e "${RED}ERROR:${NC} no se pudo hacer cd a $APP_DIR"
+    rm -f "$TEMP_HOSTFILE"
     exit 1
 }
 
-# ===== Ejecutar mpirun =====
+# ===== Ejecutar mpirun con hostfile filtrado =====
 echo "▶ Ejecutando mpirun..."
-echo "$MPIRUN -np $NPROCS --hostfile $HOSTFILE --map-by node --bind-to core --report-bindings -x PATH -x LD_LIBRARY_PATH ./main ${EXTRA_ARGS[*]}"
+echo "$MPIRUN -np $NPROCS --hostfile $TEMP_HOSTFILE --map-by node --bind-to core --report-bindings -x PATH -x LD_LIBRARY_PATH ./main ${EXTRA_ARGS[*]}"
 echo
 
 "$MPIRUN" \
     -np "$NPROCS" \
-    --hostfile "$HOSTFILE" \
+    --hostfile "$TEMP_HOSTFILE" \
     --map-by node \
     --bind-to core \
     --report-bindings \
@@ -98,6 +111,9 @@ echo
     ./main "${EXTRA_ARGS[@]}"
 
 EXIT_CODE=$?
+
+# Limpiar hostfile temporal
+rm -f "$TEMP_HOSTFILE"
 
 echo
 echo "==========================================="
