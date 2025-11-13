@@ -14,6 +14,9 @@ HOSTFILE="$HOME/.mpi_hostfile"
 # Hosts que queremos considerar (master + slaves)
 HOSTS=(localhost slave1 slave2 slave3)
 
+# ===== Argumentos a pasar al main =====
+EXTRA_ARGS=("$@")
+
 # ===== Colores =====
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -28,6 +31,7 @@ echo "Directorio de la app : $APP_DIR"
 echo "Ejecutable           : $EXECUTABLE"
 echo "Hostfile             : $HOSTFILE"
 echo "MPIRUN               : $MPIRUN"
+echo "Args para main       : ${EXTRA_ARGS[*]:-(ninguno)}"
 echo
 
 # ===== Validaciones básicas =====
@@ -80,7 +84,7 @@ cd "$APP_DIR" || {
 
 # ===== Ejecutar mpirun =====
 echo "▶ Ejecutando mpirun..."
-echo "$MPIRUN -np $NPROCS --hostfile $HOSTFILE --map-by node --bind-to core --report-bindings -x PATH -x LD_LIBRARY_PATH ./main"
+echo "$MPIRUN -np $NPROCS --hostfile $HOSTFILE --map-by node --bind-to core --report-bindings -x PATH -x LD_LIBRARY_PATH ./main ${EXTRA_ARGS[*]}"
 echo
 
 "$MPIRUN" \
@@ -91,7 +95,7 @@ echo
     --report-bindings \
     -x PATH \
     -x LD_LIBRARY_PATH \
-    ./main
+    ./main "${EXTRA_ARGS[@]}"
 
 EXIT_CODE=$?
 
