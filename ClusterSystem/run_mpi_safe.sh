@@ -91,33 +91,16 @@ available_nodes=0
 total_slots=0
 configured_nodes=0
 
-# Leer hostfile y verificar cada nodo
-# Usamos 'set -- $line' para partir la línea en tokens y buscar host + slots
-while IFS= read -r line || [[ -n "$line" ]]; do
-    # Recortar espacios al inicio y final
-    line="${line#"${line%%[![:space:]]*}"}"
-    line="${line%"${line##*[![:space:]]}"}"
-
-    # Saltar comentarios y líneas vacías
-    if [[ -z "$line" ]] || [[ "$line" =~ ^# ]]; then
-        continue
-    fi
-
-    # Partir la línea en campos
-    set -- $line
-    host="$1"
-    slots="$DEFAULT_SLOTS"
-
-    # Buscar token slots=N
-    for tok in "$@"; do
-        case "$tok" in
-            slots=*)
-                slots="${tok#slots=}"
-                ;;
-        esac
-    done
+# Leemos solo líneas útiles (sin comentarios ni vacías)
+while read -r host rest; do
+    # Seguridad extra: si host está vacío, saltar
+    [ -z "$host" ] && continue
 
     configured_nodes=$((configured_nodes + 1))
+
+    # Buscar slots=N en el resto de la línea
+    slots=$(echo "$rest" | sed -n 's/.*slots=\([0-9]\+\).*/\1/p')
+    [ -z "$slots" ] && slots=$DEFAULT_SLOTS
 
     printf "  Verificando %-20s " "$host"
 
@@ -130,7 +113,8 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     else
         echo -e "${RED}✗${NC} OFFLINE"
     fi
-done < "$HOSTFILE"
+
+done < <(grep -v '^[[:space:]]*#' "$HOSTFILE" | sed '/^[[:space:]]*$/d')
 
 # ===== Resumen de disponibilidad =====
 echo -e "\n${YELLOW}▶ Resumen del clúster:${NC}"
