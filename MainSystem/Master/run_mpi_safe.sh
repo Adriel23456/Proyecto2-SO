@@ -55,19 +55,25 @@ TEMP_HOSTFILE=$(mktemp /tmp/mpi_hosts_XXXXXX)
 AVAILABLE_HOSTS=()
 available_count=0
 
-echo "▶ Verificando nodos y ejecutable:"
+# Detectar número de cores por nodo
+CORES_PER_NODE=4  # O usa: $(nproc) para detección automática
+
+# Construir hostfile con múltiples slots
 for host in "${HOSTS[@]}"; do
     printf "  %s: " "$host"
     if ssh -o BatchMode=yes -o ConnectTimeout=3 "$host" "ls -l '$EXECUTABLE'" >/dev/null 2>&1; then
         echo -e "${GREEN}OK${NC}"
         AVAILABLE_HOSTS+=("$host")
-        available_count=$((available_count + 1))
-        # 1 proceso por nodo → slots=1
-        echo "$host slots=1" >> "$TEMP_HOSTFILE"
+        # ⭐ CAMBIO CRÍTICO: Múltiples slots por nodo
+        echo "$host slots=$CORES_PER_NODE" >> "$TEMP_HOSTFILE"
+        available_count=$((available_count + CORES_PER_NODE))
     else
         echo -e "${YELLOW}No encontrado${NC}"
     fi
 done
+
+# Actualizar número total de procesos
+NPROCS="$available_count"
 
 echo
 echo "Nodos disponibles con '$EXECUTABLE': $available_count"
@@ -100,11 +106,13 @@ echo "▶ Ejecutando mpirun..."
 echo "$MPIRUN -np $NPROCS --hostfile $TEMP_HOSTFILE --map-by node --bind-to core --report-bindings -x PATH -x LD_LIBRARY_PATH ./main ${EXTRA_ARGS[*]}"
 echo
 
+# Cambiar opciones de mpirun para mejor distribución
 "$MPIRUN" \
     -np "$NPROCS" \
     --hostfile "$TEMP_HOSTFILE" \
-    --map-by node \
+    --map-by slot \              # Cambio: slot en lugar de node
     --bind-to core \
+    --oversubscribe \            # Permite más procesos si es necesario
     --report-bindings \
     -x PATH \
     -x LD_LIBRARY_PATH \
