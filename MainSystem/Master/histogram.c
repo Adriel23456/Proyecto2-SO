@@ -14,6 +14,18 @@
 // FUNCIONES AUXILIARES PARA CONVERSIÓN DE COLOR
 // ============================================================================
 
+// Helper para escribir un píxel RGB en el buffer de imagen
+static void set_pixel(uint8_t *img, int width, int height,
+                      int x, int y,
+                      uint8_t r, uint8_t g, uint8_t b)
+{
+    if (x < 0 || x >= width || y < 0 || y >= height) return;
+    int idx = (y * width + x) * 3;
+    img[idx + 0] = r;
+    img[idx + 1] = g;
+    img[idx + 2] = b;
+}
+
 static uint16_t rgb_to_rgb565(uint8_t r, uint8_t g, uint8_t b) {
     return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
 }
@@ -122,10 +134,20 @@ bool generate_histogram_png(const Histogram *hist, const char *filename) {
     }
     
     printf("[MASTER] Generando imagen PNG del histograma: %s\n", filename);
+    printf("[MASTER]   Eje X: nivel de gris (0 = negro, 255 = blanco)\n");
+    printf("[MASTER]   Eje Y: frecuencia de píxeles para cada nivel de gris\n");
     
-    const int img_width = 512;
-    const int img_height = 300;
-    const int padding = 40;
+    const int img_width  = 512;
+    const int img_height = 320;
+    const int padding    = 40;
+    
+    // Área de dibujo del histograma (dentro del marco)
+    const int plot_left   = padding;
+    const int plot_right  = img_width - padding;
+    const int plot_top    = padding;
+    const int plot_bottom = img_height - padding;
+    const int plot_width  = plot_right - plot_left;
+    const int plot_height = plot_bottom - plot_top;
     
     // Crear imagen RGB
     uint8_t *img_data = (uint8_t*)calloc(img_width * img_height * 3, sizeof(uint8_t));
@@ -150,34 +172,67 @@ bool generate_histogram_png(const Histogram *hist, const char *filename) {
         return false;
     }
     
-    // Ancho de barra (al menos 1 píxel)
-    int bar_width = (img_width - 2 * padding) / HISTOGRAM_BINS;
+    // Colores
+    const uint8_t bar_r = 50,  bar_g = 100, bar_b = 200; // barras
+    const uint8_t frame_r = 0, frame_g = 0, frame_b = 0; // marco/ejes
+    const uint8_t grid_r = 200, grid_g = 200, grid_b = 200; // líneas guía
+    
+    // ===== Líneas de cuadrícula (X e Y) =====
+    // X: 0%, 25%, 50%, 75%, 100% de 0–255
+    for (int i = 0; i <= 4; i++) {
+        int x = plot_left + (plot_width * i) / 4;
+        for (int y = plot_top; y <= plot_bottom; y++) {
+            set_pixel(img_data, img_width, img_height, x, y, grid_r, grid_g, grid_b);
+        }
+        int gray_value = (255 * i) / 4;
+        printf("[MASTER]   Marca X %d%% ≈ nivel gris %d\n", i * 25, gray_value);
+    }
+    
+    // Y: 0%, 25%, 50%, 75%, 100% de frecuencia máxima
+    for (int i = 0; i <= 4; i++) {
+        int y = plot_bottom - (plot_height * i) / 4;
+        for (int x = plot_left; x <= plot_right; x++) {
+            set_pixel(img_data, img_width, img_height, x, y, grid_r, grid_g, grid_b);
+        }
+        uint32_t freq_value = (max_freq * i) / 4;
+        printf("[MASTER]   Marca Y %d%% ≈ frecuencia %u\n", i * 25, freq_value);
+    }
+    
+    // ===== Dibujar barras del histograma =====
+    int bar_width = plot_width / HISTOGRAM_BINS;
     if (bar_width < 1) bar_width = 1;
     
-    int max_bar_height = img_height - 2 * padding;
-    
     for (int i = 0; i < HISTOGRAM_BINS; i++) {
-        int bar_height = (int)((float)hist->bins[i] / max_freq * max_bar_height);
-        int x = padding + i * bar_width;
-        int y_start = img_height - padding - bar_height;
-        int y_end = img_height - padding;
-        
+        int bar_height = (int)((float)hist->bins[i] / max_freq * (float)plot_height);
         if (bar_height <= 0) continue;
         
-        // Dibujar barra (azul oscuro)
+        int x_base = plot_left + i * bar_width;
+        int y_start = plot_bottom - bar_height;
+        int y_end   = plot_bottom;
+        
         for (int y = y_start; y < y_end; y++) {
-            if (y < 0 || y >= img_height) continue;
-            for (int bx = 0; bx < bar_width; bx++) {  // <-- SIN "- 1"
-                int px = x + bx;
-                if (px < 0 || px >= img_width) continue;
-                int idx = (y * img_width + px) * 3;
-                img_data[idx + 0] = 50;   // R
-                img_data[idx + 1] = 100;  // G
-                img_data[idx + 2] = 200;  // B
+            if (y < plot_top || y > plot_bottom) continue;
+            for (int bx = 0; bx < bar_width; bx++) {
+                int px = x_base + bx;
+                if (px < plot_left || px > plot_right) continue;
+                set_pixel(img_data, img_width, img_height, px, y, bar_r, bar_g, bar_b);
             }
         }
     }
     
+    // ===== Marco que encierra el histograma (ejes X/Y incluidos) =====
+    // Línea superior e inferior
+    for (int x = plot_left; x <= plot_right; x++) {
+        set_pixel(img_data, img_width, img_height, x, plot_top,    frame_r, frame_g, frame_b);
+        set_pixel(img_data, img_width, img_height, x, plot_bottom, frame_r, frame_g, frame_b);
+    }
+    // Línea izquierda y derecha
+    for (int y = plot_top; y <= plot_bottom; y++) {
+        set_pixel(img_data, img_width, img_height, plot_left,  y, frame_r, frame_g, frame_b);
+        set_pixel(img_data, img_width, img_height, plot_right, y, frame_r, frame_g, frame_b);
+    }
+    
+    // Guardar imagen
     int result = stbi_write_png(filename, img_width, img_height, 3, img_data, img_width * 3);
     free(img_data);
     
