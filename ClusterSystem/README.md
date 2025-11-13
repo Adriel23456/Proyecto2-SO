@@ -280,11 +280,13 @@ int main(int argc, char** argv) {
 }
 ```
 
+
 ### Compilar en TODOS los nodos:
 ```bash
 cd ~/Documents/Proyecto2-SO/ClusterSystem
 /opt/openmpi-4.1.6/bin/mpicc -o ejemplo ejemplo.c
 ```
+
 
 ---
 
@@ -492,12 +494,7 @@ mpirun-safe
 ### Método 2: Ejecución directa
 ```bash
 cd ~/Documents/Proyecto2-SO/ClusterSystem
-/opt/openmpi-4.1.6/bin/mpirun \
-    --hostfile ~/.mpi_hostfile \
-    --np 4 \
-    --hetero \
-    --map-by node \
-    ./ejemplo
+/opt/openmpi-4.1.6/bin/mpirun     -np 4     --hostfile ~/.mpi_hostfile     --map-by node     --bind-to core     --report-bindings     -x PATH     -x LD_LIBRARY_PATH     ./ejemplo
 ```
 
 ---

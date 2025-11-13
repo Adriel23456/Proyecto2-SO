@@ -3,8 +3,9 @@
 # Ejecuta MPI solo con nodos disponibles en clúster heterogéneo
 
 # ===== Configuración =====
+# ===== Configuración =====
 EXECUTABLE="./ejemplo"
-HOSTFILE="$HOME/.mpi_hostfile"
+HOSTFILE="/home/adriel/.mpi_hostfile"
 TEMP_HOSTFILE="/tmp/mpi_hostfile_available_$$"
 TIMEOUT=3
 MPI_PATH="/opt/openmpi-4.1.6"
@@ -66,6 +67,8 @@ done
 echo -e "${BLUE}╔══════════════════════════════════════════════╗${NC}"
 echo -e "${BLUE}║    ${YELLOW}Sistema MPI Heterogéneo OpenMPI 4.1.6${BLUE}    ║${NC}"
 echo -e "${BLUE}╚══════════════════════════════════════════════╝${NC}\n"
+
+echo "Usando hostfile: $HOSTFILE"
 
 # ===== Validaciones =====
 if [ ! -f "$HOSTFILE" ]; then
