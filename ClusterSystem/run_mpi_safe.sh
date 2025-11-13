@@ -1,137 +1,180 @@
 #!/bin/bash
 # Script: run_mpi_safe.sh
-# Ejecuta MPI sólo con los nodos disponibles respetando host:ppn
+# Ejecuta MPI solo con nodos disponibles en clúster heterogéneo
 
-# ===== Opciones =====
+# ===== Configuración =====
 EXECUTABLE="./ejemplo"
-ORIGINAL_HOSTFILE="${HYDRA_HOST_FILE:-$HOME/.mpi_hostfile}"
-TEMP_HOSTFILE="/tmp/.mpi_hostfile_available"
+HOSTFILE="${HOME}/.mpi_hostfile"
+TEMP_HOSTFILE="/tmp/mpi_hostfile_available_$$"
 TIMEOUT=3
-IFACE=""
-REQ_NPROCS=""
+MPI_PATH="/opt/openmpi-4.1.6"
+DEFAULT_SLOTS=2
 
-# Args simples: -n, -e, -f, -t, -i
-while getopts ":n:e:f:t:i:" opt; do
-  case "$opt" in
-    n) REQ_NPROCS="$OPTARG" ;;
-    e) EXECUTABLE="$OPTARG" ;;
-    f) ORIGINAL_HOSTFILE="$OPTARG" ;;
-    t) TIMEOUT="$OPTARG" ;;
-    i) IFACE="$OPTARG" ;;
-    \?) echo "Uso: $0 [-n NPROCS] [-e EXEC] [-f HOSTFILE] [-t TIMEOUT] [-i IFACE]"; exit 1 ;;
-  esac
+# ===== Colores para output =====
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+# ===== Procesar argumentos =====
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -e|--executable)
+            EXECUTABLE="$2"
+            shift 2
+            ;;
+        -n|--nprocs)
+            FORCE_NPROCS="$2"
+            shift 2
+            ;;
+        -h|--help)
+            echo "Uso: $0 [opciones]"
+            echo "  -e, --executable PROG   Ejecutable MPI (default: ./ejemplo)"
+            echo "  -n, --nprocs N         Forzar número de procesos"
+            echo "  -h, --help             Mostrar esta ayuda"
+            exit 0
+            ;;
+        *)
+            echo "Opción desconocida: $1"
+            exit 1
+            ;;
+    esac
 done
 
-# ===== Colores =====
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+# ===== Funciones =====
+check_node() {
+    local host=$1
+    local timeout=$2
+    ssh -o ConnectTimeout=$timeout \
+        -o BatchMode=yes \
+        -o StrictHostKeyChecking=no \
+        -o LogLevel=ERROR \
+        "$host" "exit" 2>/dev/null
+    return $?
+}
 
-echo -e "${YELLOW}=== Sistema MPI Robusto (host:ppn) ===${NC}\n"
+get_arch() {
+    local host=$1
+    ssh -o ConnectTimeout=2 \
+        -o BatchMode=yes \
+        -o LogLevel=ERROR \
+        "$host" "uname -m" 2>/dev/null || echo "unknown"
+}
 
-# ===== Validaciones básicas =====
-if [ ! -f "$ORIGINAL_HOSTFILE" ]; then
-  echo -e "${RED}ERROR: No se encuentra $ORIGINAL_HOSTFILE${NC}"; exit 1
+# ===== Header =====
+echo -e "${BLUE}╔══════════════════════════════════════════════╗${NC}"
+echo -e "${BLUE}║    ${YELLOW}Sistema MPI Heterogéneo OpenMPI 4.1.6${BLUE}    ║${NC}"
+echo -e "${BLUE}╚══════════════════════════════════════════════╝${NC}\n"
+
+# ===== Validaciones =====
+if [ ! -f "$HOSTFILE" ]; then
+    echo -e "${RED}✗ ERROR: No se encuentra $HOSTFILE${NC}"
+    exit 1
 fi
+
 if [ ! -f "$EXECUTABLE" ]; then
-  echo -e "${RED}ERROR: No se encuentra el ejecutable $EXECUTABLE${NC}"; exit 1
+    echo -e "${RED}✗ ERROR: No se encuentra el ejecutable $EXECUTABLE${NC}"
+    exit 1
 fi
 
-# ===== Preparación =====
+if [ ! -x "$MPI_PATH/bin/mpirun" ]; then
+    echo -e "${RED}✗ ERROR: OpenMPI no está instalado en $MPI_PATH${NC}"
+    exit 1
+fi
+
+# ===== Verificar nodos =====
+echo -e "${YELLOW}▶ Escaneando clúster...${NC}\n"
+
 : > "$TEMP_HOSTFILE"
-available_hosts=0
-available_slots=0
-configured_hosts=0
+available_nodes=0
+total_slots=0
+configured_nodes=0
 
-echo -e "${YELLOW}Verificando disponibilidad de nodos...${NC}\n"
+# Leer hostfile y verificar cada nodo
+while IFS= read -r line; do
+    # Saltar comentarios y líneas vacías
+    [[ "$line" =~ ^#.*$ ]] || [ -z "$line" ] && continue
+    
+    # Extraer host y slots
+    host=$(echo "$line" | awk '{print $1}')
+    slots=$(echo "$line" | grep -o 'slots=[0-9]*' | cut -d= -f2)
+    [ -z "$slots" ] && slots=$DEFAULT_SLOTS
+    
+    configured_nodes=$((configured_nodes + 1))
+    
+    printf "  Verificando %-20s " "$host"
+    
+    if check_node "$host" "$TIMEOUT"; then
+        arch=$(get_arch "$host")
+        echo -e "${GREEN}✓${NC} ONLINE [${arch}] (slots=$slots)"
+        echo "$host slots=$slots" >> "$TEMP_HOSTFILE"
+        available_nodes=$((available_nodes + 1))
+        total_slots=$((total_slots + slots))
+    else
+        echo -e "${RED}✗${NC} OFFLINE"
+    fi
+done < "$HOSTFILE"
 
-# Leer con FD 3 para que ssh no consuma stdin
-while IFS= read -r raw <&3 || [ -n "$raw" ]; do
-  # Limpia espacios y comentarios al inicio
-  line="$(echo "$raw" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
-  # Descarta líneas vacías y comentarios puros
-  [[ -z "$line" || "$line" =~ ^# ]] && continue
-  # Si hay comentario inline, córtalo
-  line="$(echo "$line" | sed -E 's/[[:space:]]*#.*$//')"
-  [[ -z "$line" ]] && continue
+# ===== Resumen de disponibilidad =====
+echo -e "\n${YELLOW}▶ Resumen del clúster:${NC}"
+echo "  • Nodos configurados: $configured_nodes"
+echo "  • Nodos disponibles:  $available_nodes"
+echo "  • Slots totales:      $total_slots"
 
-  # host[:ppn]
-  host="$(echo "$line" | cut -d':' -f1 | xargs)"
-  ppn="$( echo "$line" | awk -F: 'NF>=2{print $2; exit} NF<2{print ""}' )"
-  [[ -z "$ppn" ]] && ppn=1
-
-  # Valida ppn numérico y >=1
-  if ! [[ "$ppn" =~ ^[0-9]+$ ]] || [ "$ppn" -lt 1 ]; then
-    echo -e "  $host: ${RED}ppn inválido \"$ppn\"; usando 1${NC}"
-    ppn=1
-  fi
-
-  configured_hosts=$((configured_hosts+1))
-  printf "  Verificando %-18s (ppn=%-2s) ... " "$host" "$ppn"
-
-  # Prueba ssh sin password
-  ssh -o ConnectTimeout=$TIMEOUT -o BatchMode=yes -o StrictHostKeyChecking=no "$host" "exit" < /dev/null 2>/dev/null
-  if [ $? -eq 0 ]; then
-    echo -e "${GREEN}DISPONIBLE${NC}"
-    echo "${host}:${ppn}" >> "$TEMP_HOSTFILE"
-    available_hosts=$((available_hosts+1))
-    available_slots=$((available_slots+ppn))
-  else
-    echo -e "${RED}NO DISPONIBLE${NC}"
-  fi
-done 3< "$ORIGINAL_HOSTFILE"
-
-echo
-echo -e "${YELLOW}Resumen:${NC}"
-echo "  Hosts configurados : $configured_hosts"
-echo "  Hosts disponibles   : $available_hosts"
-echo "  Slots disponibles   : $available_slots"
-
-if [ "$available_hosts" -eq 0 ]; then
-  echo -e "${RED}ERROR: No hay hosts disponibles. Abortando.${NC}"
-  rm -f "$TEMP_HOSTFILE"
-  exit 1
+if [ "$available_nodes" -eq 0 ]; then
+    echo -e "\n${RED}✗ ERROR: No hay nodos disponibles${NC}"
+    rm -f "$TEMP_HOSTFILE"
+    exit 1
 fi
 
-# ===== Determina NPROCS =====
-if [[ -n "$REQ_NPROCS" ]]; then
-  if ! [[ "$REQ_NPROCS" =~ ^[0-9]+$ ]] || [ "$REQ_NPROCS" -lt 1 ]; then
-    echo -e "${RED}ERROR: valor de -n inválido: $REQ_NPROCS${NC}"
-    rm -f "$TEMP_HOSTFILE"; exit 1
-  fi
-  NPROCS="$REQ_NPROCS"
-  if [ "$NPROCS" -gt "$available_slots" ]; then
-    echo -e "${YELLOW}Aviso:${NC} solicitaste -n $NPROCS pero sólo hay $available_slots slots; ajustando a $available_slots."
-    NPROCS="$available_slots"
-  fi
+# ===== Determinar número de procesos =====
+if [ -n "$FORCE_NPROCS" ]; then
+    NPROCS=$FORCE_NPROCS
+    if [ "$NPROCS" -gt "$total_slots" ]; then
+        echo -e "\n${YELLOW}⚠ Advertencia: Solicitaste $NPROCS procesos pero solo hay $total_slots slots${NC}"
+        echo -e "  Ajustando a $total_slots procesos..."
+        NPROCS=$total_slots
+    fi
 else
-  # Por defecto usa todos los slots disponibles
-  NPROCS="$available_slots"
+    NPROCS=$total_slots
 fi
 
-echo -e "\n${GREEN}Ejecutando:${NC} mpiexec -n $NPROCS (slots=$available_slots) en $available_hosts host(s)\n"
+# ===== Ejecutar MPI =====
+echo -e "\n${BLUE}▶ Ejecutando MPI con $NPROCS procesos en $available_nodes nodos${NC}\n"
+echo -e "${YELLOW}════════════════════════════════════════════════${NC}\n"
 
-# ===== Construye cmd de mpiexec =====
-MPIEXEC="/usr/local/mpich-4.3.2/bin/mpiexec"
-CMD=( "$MPIEXEC" -bootstrap ssh -f "$TEMP_HOSTFILE" -n "$NPROCS"
-      -genvlist PATH,LD_LIBRARY_PATH
-      -env DISPLAY "" -l )
+# Construir comando MPI con opciones para heterogeneidad
+$MPI_PATH/bin/mpirun \
+    --hostfile "$TEMP_HOSTFILE" \
+    --np "$NPROCS" \
+    --hetero \
+    --map-by node \
+    --bind-to core \
+    --report-bindings \
+    -x PATH \
+    -x LD_LIBRARY_PATH \
+    "$EXECUTABLE"
 
-# iface opcional
-if [[ -n "$IFACE" ]]; then
-  CMD+=( -iface "$IFACE" )
-fi
-
-# Ejecuta
-"${CMD[@]}" "$EXECUTABLE"
 EXIT_CODE=$?
 
-# Limpieza
+echo -e "\n${YELLOW}════════════════════════════════════════════════${NC}"
+
+# ===== Limpieza =====
 rm -f "$TEMP_HOSTFILE"
 
-echo
+# ===== Resultado final =====
 if [ $EXIT_CODE -eq 0 ]; then
-  echo -e "${GREEN}✓ Ejecución completada exitosamente${NC}"
+    echo -e "\n${GREEN}✓ Ejecución completada exitosamente${NC}\n"
 else
-  echo -e "${RED}✗ Error en la ejecución (código: $EXIT_CODE)${NC}"
+    echo -e "\n${RED}✗ Error en la ejecución (código: $EXIT_CODE)${NC}\n"
 fi
 
 exit $EXIT_CODE
+```
+
+### Hacer ejecutable y copiar globalmente:
+```bash
+chmod +x ~/mpi_cluster/run_mpi_safe.sh
+sudo cp ~/mpi_cluster/run_mpi_safe.sh /usr/local/bin/mpirun-safe
+sudo chmod +x /usr/local/bin/mpirun-safe

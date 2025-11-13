@@ -1,60 +1,60 @@
-# 🧠 Clúster Beowulf **heterogéneo** con **MPICH (Hydra)** — Guía limpia y replicable
+# 🚀 Clúster Beowulf **Heterogéneo** con **OpenMPI** — ARM7 + x86_64
 
-> **Objetivo:** Montar un clúster Beowulf (master + slaves) mezclando **Raspberry Pi 32-bit** y **PCs x86_64**, usando **MPICH 4.3.2 (Hydra)** sobre **SSH**.
-> **Resultado esperado:** `mpiexec -n 4 ./ejemplo` imprime 4 líneas "Hola desde el proceso …".
+> **Arquitectura:** Master en Raspberry Pi OS (ARM7 32-bit) + Slaves en Ubuntu (x86_64)  
+> **MPI:** OpenMPI 4.1.6 con soporte heterogéneo completo  
+> **Objetivo:** Ejecutar procesos MPI distribuidos entre arquitecturas diferentes
 
 ---
 
-## 0) Nombres e IPs coherentes (sin borrar nada especial)
+## 📋 Pre-requisitos
 
-* **Mismo usuario** en todos los nodos (recomendado):
+- Raspberry Pi con Raspberry Pi OS (32-bit ARM7)
+- PCs/VMs con Ubuntu 22.04/24.04 (x86_64)
+- Conexión de red entre todos los nodos
+- Usuario común en todos los nodos (ej: `adriel`)
 
+---
+
+## 0) Configuración de red y nombres
+
+### En TODOS los nodos:
+
+1. **Crear usuario común** (si no existe):
 ```bash
-# si lo necesitas
 sudo adduser adriel
 sudo usermod -aG sudo adriel
 su - adriel
 ```
 
-1. **Obtén la IP de cada nodo**:
+2. **Obtener IPs de cada nodo**:
+```bash
+hostname -I | awk '{print $1}'
+```
 
-   ```bash
-   hostname -I
-   ```
+3. **Configurar `/etc/hosts`** (ajusta con tus IPs):
+```bash
+sudo nano /etc/hosts
+```
 
-   > Si no tienes la herramienta en algún nodo: `sudo apt install -y net-tools` (opcional).
+Contenido ejemplo:
+```
+192.168.18.242  raspberrypi master
+192.168.18.10   slave1
+192.168.18.241  slave2
+192.168.18.90   slave3
+```
 
-2. **Edita `/etc/hosts` en *todos* los nodos con `nano`**:
-
-   ```bash
-   sudo nano /etc/hosts
-   ```
-
-   **EJEMPLO (ajusta tus IPs reales):**
-
-   ```
-   192.168.18.242  raspberrypi master
-   192.168.18.10   slave1
-   192.168.18.241  slave2
-   ```
-
-   * "raspberrypi" es el **hostname real** del Pi.
-   * "master" es un **alias contextual** para el Pi.
-   * No es necesario eliminar ni comentar líneas; solo asegura que el **nombre coincida con su IP**.
-
-3. **Verifica desde cada nodo**:
-
-   ```bash
-   getent hosts raspberrypi
-   ping -c 2 raspberrypi
-   ```
+4. **Verificar conectividad**:
+```bash
+ping -c 2 master
+ping -c 2 slave1
+```
 
 ---
 
-## 1) Instala e inicializa **SSH** en cada nodo
+## 1) Instalación de SSH
 
-> Repite en **Pi y en cada PC** (master y slaves).
-
+### En TODOS los nodos:
 ```bash
 sudo apt update
 sudo apt install -y openssh-server openssh-client
@@ -64,300 +64,550 @@ sudo systemctl status ssh
 
 ---
 
-## 2) Instala **MPICH 4.3.2 (Hydra)** con soporte heterogéneo
+## 2) Instalación de OpenMPI 4.1.6 con soporte heterogéneo
 
-> Repite en **todos los nodos** (Pi y PCs). Mismo `--prefix` y **mismos flags** en todos.
+### ⚠️ IMPORTANTE: Usar exactamente la misma versión y prefijo en TODOS los nodos
 
-### Raspberry Pi (ARM 32-bit)
-
+### En Raspberry Pi (ARM7 32-bit - Master)
 ```bash
-cd ~
+# Limpiar cualquier instalación previa de OpenMPI
+sudo rm -rf /opt/openmpi* /usr/local/openmpi*
+sed -i '/openmpi/Id' ~/.bashrc
+source ~/.bashrc
+
+# Instalar dependencias
 sudo apt update
-sudo apt install -y build-essential libhwloc-dev libevent-dev
+sudo apt install -y build-essential gfortran libhwloc-dev libevent-dev
 
-# Descargar y preparar Open MPI 4.1.6
-[ -d openmpi-4.1.6 ] || (wget https://download.open-mpi.org/release/open-mpi/v4.1/openmpi-4.1.6.tar.gz && tar xzf openmpi-4.1.6.tar.gz)
+# Descargar OpenMPI 4.1.6
+cd ~
+wget https://download.open-mpi.org/release/open-mpi/v4.1/openmpi-4.1.6.tar.gz
+tar xzf openmpi-4.1.6.tar.gz
 cd openmpi-4.1.6
-make distclean 2>/dev/null || true
 
-# Compilar con soporte heterogéneo y prefijo aislado
-./configure --prefix=/opt/openmpi-4.1.6-hetero \
+# Configurar para ARM7 32-bit con soporte heterogéneo
+./configure --prefix=/opt/openmpi-4.1.6 \
             --enable-heterogeneous \
-            --enable-mpirun-prefix-by-default
+            --enable-mpi-fortran=no \
+            --enable-mpirun-prefix-by-default \
+            --with-hwloc=internal \
+            --with-libevent=internal \
+            --disable-mpi-fortran \
+            --enable-shared \
+            --enable-static \
+            CC=gcc CXX=g++ \
+            CFLAGS="-O2 -march=armv7-a -mfpu=vfp -mfloat-abi=hard" \
+            CXXFLAGS="-O2 -march=armv7-a -mfpu=vfp -mfloat-abi=hard"
 
+# Compilar e instalar
 make -j$(nproc)
 sudo make install
 
-# Exportar rutas (puedes añadirlas al .bashrc si deseas)
-echo 'export PATH=/opt/openmpi-4.1.6-hetero/bin:$PATH' >> ~/.bashrc
-echo 'export LD_LIBRARY_PATH=/opt/openmpi-4.1.6-hetero/lib:$LD_LIBRARY_PATH' >> ~/.bashrc
+# Configurar variables de entorno
+echo 'export PATH=/opt/openmpi-4.1.6/bin:$PATH' >> ~/.bashrc
+echo 'export LD_LIBRARY_PATH=/opt/openmpi-4.1.6/lib:$LD_LIBRARY_PATH' >> ~/.bashrc
 source ~/.bashrc
 
-# Registrar librerías y comprobar instalación
-echo '/opt/openmpi-4.1.6-hetero/lib' | sudo tee /etc/ld.so.conf.d/openmpi-4.1.6-hetero.conf
+# Registrar bibliotecas
+echo '/opt/openmpi-4.1.6/lib' | sudo tee /etc/ld.so.conf.d/openmpi.conf
 sudo ldconfig
 
+# Verificar instalación
 which mpicc
 mpirun --version
-mpirun -n 1 bash -lc 'echo OK on $(uname -m)'
+ompi_info | grep -i heterogeneous
 ```
 
-### Slaves x86_64 (PCs Ubuntu 64-bit)
-
+### En Slaves x86_64 (Ubuntu 64-bit)
 ```bash
-cd ~
+# Limpiar instalaciones previas
+sudo rm -rf /opt/openmpi* /usr/local/openmpi*
+sed -i '/openmpi/Id' ~/.bashrc
+source ~/.bashrc
+
+# Instalar dependencias
 sudo apt update
-sudo apt install -y build-essential libhwloc-dev libevent-dev
+sudo apt install -y build-essential gfortran libhwloc-dev libevent-dev
 
-# Descargar y preparar Open MPI 4.1.6
-[ -d openmpi-4.1.6 ] || (wget https://download.open-mpi.org/release/open-mpi/v4.1/openmpi-4.1.6.tar.gz && tar xzf openmpi-4.1.6.tar.gz)
+# Descargar OpenMPI 4.1.6
+cd ~
+wget https://download.open-mpi.org/release/open-mpi/v4.1/openmpi-4.1.6.tar.gz
+tar xzf openmpi-4.1.6.tar.gz
 cd openmpi-4.1.6
-make distclean 2>/dev/null || true
 
-# Compilar con soporte heterogéneo y prefijo idéntico al del Pi
-./configure --prefix=/opt/openmpi-4.1.6-hetero \
+# Configurar para x86_64 con soporte heterogéneo
+./configure --prefix=/opt/openmpi-4.1.6 \
             --enable-heterogeneous \
-            --enable-mpirun-prefix-by-default
+            --enable-mpi-fortran=no \
+            --enable-mpirun-prefix-by-default \
+            --with-hwloc=internal \
+            --with-libevent=internal \
+            --disable-mpi-fortran \
+            --enable-shared \
+            --enable-static \
+            CC=gcc CXX=g++ \
+            CFLAGS="-O2" \
+            CXXFLAGS="-O2"
 
+# Compilar e instalar
 make -j$(nproc)
 sudo make install
 
-# Exportar rutas
-echo 'export PATH=/opt/openmpi-4.1.6-hetero/bin:$PATH' >> ~/.bashrc
-echo 'export LD_LIBRARY_PATH=/opt/openmpi-4.1.6-hetero/lib:$LD_LIBRARY_PATH' >> ~/.bashrc
+# Configurar variables de entorno
+echo 'export PATH=/opt/openmpi-4.1.6/bin:$PATH' >> ~/.bashrc
+echo 'export LD_LIBRARY_PATH=/opt/openmpi-4.1.6/lib:$LD_LIBRARY_PATH' >> ~/.bashrc
 source ~/.bashrc
 
-# Registrar librerías y verificar
-echo '/opt/openmpi-4.1.6-hetero/lib' | sudo tee /etc/ld.so.conf.d/openmpi-4.1.6-hetero.conf
+# Registrar bibliotecas
+echo '/opt/openmpi-4.1.6/lib' | sudo tee /etc/ld.so.conf.d/openmpi.conf
 sudo ldconfig
 
+# Verificar instalación
 which mpicc
 mpirun --version
-mpirun -n 1 bash -lc 'echo OK on $(uname -m)'
+ompi_info | grep -i heterogeneous
 ```
 
 ---
 
-## 3) Configura **SSH sin contraseña** (desde el *launcher* hacia todos)
+## 3) Configuración SSH sin contraseña
 
-> El *launcher* puede ser el Pi o un PC; elige uno y realiza estos pasos **solo allí**.
-
-1. **Genera llave (si no existe)**:
-
-   ```bash
-   [ -f ~/.ssh/id_ed25519 ] || ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519
-   ```
-
-2. **Instala la llave pública en cada nodo (usa tus nombres o IPs)**:
-
-   ```bash
-   ssh-copy-id -i ~/.ssh/id_ed25519.pub adriel@raspberrypi
-   ssh-copy-id -i ~/.ssh/id_ed25519.pub adriel@slave1
-   ssh-copy-id -i ~/.ssh/id_ed25519.pub adriel@slave2
-   ssh-copy-id -i ~/.ssh/id_ed25519.pub adriel@slave3
-   ```
-
-3. **Permisos correctos remotos (por si acaso)**:
-
-   ```bash
-   ssh adriel@raspberrypi 'chmod 700 ~/.ssh; chmod 600 ~/.ssh/authorized_keys'
-   ssh adriel@slave1     'chmod 700 ~/.ssh; chmod 600 ~/.ssh/authorized_keys'
-   ssh adriel@slave2     'chmod 700 ~/.ssh; chmod 600 ~/.ssh/authorized_keys'
-   ssh adriel@slave3     'chmod 700 ~/.ssh; chmod 600 ~/.ssh/authorized_keys'
-   ```
-
-4. **Prueba sin password**:
-
-   ```bash
-   ssh -o BatchMode=yes adriel@raspberrypi 'true' && echo OK_PI
-   ssh -o BatchMode=yes adriel@slave1     'true' && echo OK_S1
-   ssh -o BatchMode=yes adriel@slave2     'true' && echo OK_S2
-   ssh -o BatchMode=yes adriel@slave3     'true' && echo OK_S3
-   ```
-
----
-
-## 4) Crea el **hostfile de Hydra** (solo en el *launcher*)
-
-1. **Edita con `nano`**:
-
-   ```bash
-   nano ~/.mpi_hostfile
-   ```
-2. **Contenido (formato Hydra = `host:PPN`)**:
-
-   ```                                              
-   192.168.18.10:1
-   #slave1
-
-   192.168.18.241:1
-   #slave2
-
-   192.168.18.90:1
-   #slave3
-   ```
-   
-   > **Nota:** Puedes incluir **todos** los slaves potenciales del clúster, incluso si no están siempre encendidos. El script `mpirun-safe` (sección 6) detectará automáticamente cuáles están disponibles.
-
-3. **(Opcional) Exporta variable para no pasar `-f`**:
-
-   ```bash
-   echo 'export HYDRA_HOST_FILE=~/.mpi_hostfile' >> ~/.bashrc
-   source ~/.bashrc
-   ```
-   
----
-
-## 5) Prepara el código y compila (misma ruta en todos)
-
-1. **Crea/asegura la ruta** en **cada nodo**:
-
-   ```bash
-   cd ~/Documents
-   git clone https://github.com/Adriel23456/Proyecto2-SO.git
-   ```
-
-2. **Compila con ESTE MPICH en todos**:
-
-   ```bash
-   cd ~/Documents/Proyecto2-SO/ClusterSystem
-   /usr/local/mpich-4.3.2/bin/mpicc ejemplo.c -o ejemplo
-   ```
-
----
-
-## 6) 🚀 Script robusto: `mpirun-safe` (RECOMENDADO)
-
-> **Problema resuelto:** Si un slave está apagado, `mpiexec` normalmente falla. Este script **detecta automáticamente** qué nodos están disponibles y ejecuta MPI solo con ellos.
-
-### 6.1) Crea el script `run_mpi_safe.sh`
-
-Ya esta creado por el repositorio de github!
-
-### 6.2) Instala el script globalmente
-
+### Desde el MASTER (Raspberry Pi):
 ```bash
-# Dale permisos de ejecución
-chmod +x run_mpi_safe.sh
+# Generar llave SSH
+[ -f ~/.ssh/id_ed25519 ] || ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519
 
-# Copia el script a un lugar accesible globalmente
-sudo cp run_mpi_safe.sh /usr/local/bin/mpirun-safe
+# Copiar llave a todos los nodos (incluido el master mismo)
+ssh-copy-id -i ~/.ssh/id_ed25519.pub adriel@localhost
+ssh-copy-id -i ~/.ssh/id_ed25519.pub adriel@slave1
+ssh-copy-id -i ~/.ssh/id_ed25519.pub adriel@slave2
+ssh-copy-id -i ~/.ssh/id_ed25519.pub adriel@slave3
 
-# Asegura permisos de ejecución
+# Verificar permisos
+ssh adriel@localhost 'chmod 700 ~/.ssh; chmod 600 ~/.ssh/authorized_keys'
+ssh adriel@slave1 'chmod 700 ~/.ssh; chmod 600 ~/.ssh/authorized_keys'
+ssh adriel@slave2 'chmod 700 ~/.ssh; chmod 600 ~/.ssh/authorized_keys'
+ssh adriel@slave3 'chmod 700 ~/.ssh; chmod 600 ~/.ssh/authorized_keys'
+
+# Probar conexión sin contraseña
+ssh -o BatchMode=yes adriel@localhost 'echo OK_MASTER'
+ssh -o BatchMode=yes adriel@slave1 'echo OK_SLAVE1'
+ssh -o BatchMode=yes adriel@slave2 'echo OK_SLAVE2'
+ssh -o BatchMode=yes adriel@slave3 'echo OK_SLAVE3'
+```
+
+---
+
+## 4) Crear archivo de hosts para OpenMPI
+
+### En el MASTER:
+```bash
+nano ~/.mpi_hostfile
+```
+
+Contenido (ajusta IPs y slots según tu configuración):
+```
+# Master (Raspberry Pi ARM7)
+192.168.18.242 slots=2 max_slots=4
+
+# Slaves x86_64
+192.168.18.10  slots=2 max_slots=4
+192.168.18.241 slots=2 max_slots=4
+192.168.18.90  slots=2 max_slots=4
+```
+
+---
+
+## 5) Preparar el programa de prueba
+
+### Crear directorio de trabajo en TODOS los nodos:
+```bash
+cd ~/Documents/Proyecto2-SO/ClusterSystem
+```
+
+### Crear y compilar el programa en TODOS los nodos:
+
+Guarda esto como `ejemplo.c`:
+```c
+#include <mpi.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <stdlib.h>
+
+int main(int argc, char** argv) {
+    int world_size, world_rank, name_len;
+    char processor_name[MPI_MAX_PROCESSOR_NAME];
+    char hostname[256];
+    
+    // Inicializar MPI
+    MPI_Init(&argc, &argv);
+    
+    // Obtener información del proceso
+    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+    MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+    MPI_Get_processor_name(processor_name, &name_len);
+    
+    // Obtener hostname del sistema
+    gethostname(hostname, sizeof(hostname));
+    
+    // Detectar arquitectura
+    #ifdef __arm__
+        const char* arch = "ARM";
+    #elif __x86_64__
+        const char* arch = "x86_64";
+    #elif __i386__
+        const char* arch = "x86_32";
+    #else
+        const char* arch = "Unknown";
+    #endif
+    
+    // Imprimir mensaje desde proceso externo
+    printf("Hola desde proceso externo %d de %d total | Host: %s | Arch: %s | PID: %d\n", 
+           world_rank, world_size, processor_name, arch, getpid());
+    
+    // Sincronizar todos los procesos
+    MPI_Barrier(MPI_COMM_WORLD);
+    
+    // Solo el proceso 0 imprime resumen
+    if (world_rank == 0) {
+        printf("\n=== Ejecución MPI Heterogénea Completada ===\n");
+        printf("Total de procesos: %d\n", world_size);
+    }
+    
+    // Finalizar MPI
+    MPI_Finalize();
+    return 0;
+}
+```
+
+### Compilar en TODOS los nodos:
+```bash
+cd ~/Documents/Proyecto2-SO/ClusterSystem
+/opt/openmpi-4.1.6/bin/mpicc -o ejemplo ejemplo.c
+```
+
+---
+
+## 6) Script run_mpi_safe.sh mejorado
+
+### Crear el script en el MASTER:
+```bash
+nano ~/Documents/Proyecto2-SO/ClusterSystem/run_mpi_safe.sh
+```
+
+Contenido:
+```bash
+#!/bin/bash
+# Script: run_mpi_safe.sh
+# Ejecuta MPI solo con nodos disponibles en clúster heterogéneo
+
+# ===== Configuración =====
+EXECUTABLE="./ejemplo"
+HOSTFILE="${HOME}/.mpi_hostfile"
+TEMP_HOSTFILE="/tmp/mpi_hostfile_available_$$"
+TIMEOUT=3
+MPI_PATH="/opt/openmpi-4.1.6"
+DEFAULT_SLOTS=2
+
+# ===== Colores para output =====
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+# ===== Procesar argumentos =====
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -e|--executable)
+            EXECUTABLE="$2"
+            shift 2
+            ;;
+        -n|--nprocs)
+            FORCE_NPROCS="$2"
+            shift 2
+            ;;
+        -h|--help)
+            echo "Uso: $0 [opciones]"
+            echo "  -e, --executable PROG   Ejecutable MPI (default: ./ejemplo)"
+            echo "  -n, --nprocs N         Forzar número de procesos"
+            echo "  -h, --help             Mostrar esta ayuda"
+            exit 0
+            ;;
+        *)
+            echo "Opción desconocida: $1"
+            exit 1
+            ;;
+    esac
+done
+
+# ===== Funciones =====
+check_node() {
+    local host=$1
+    local timeout=$2
+    ssh -o ConnectTimeout=$timeout \
+        -o BatchMode=yes \
+        -o StrictHostKeyChecking=no \
+        -o LogLevel=ERROR \
+        "$host" "exit" 2>/dev/null
+    return $?
+}
+
+get_arch() {
+    local host=$1
+    ssh -o ConnectTimeout=2 \
+        -o BatchMode=yes \
+        -o LogLevel=ERROR \
+        "$host" "uname -m" 2>/dev/null || echo "unknown"
+}
+
+# ===== Header =====
+echo -e "${BLUE}╔══════════════════════════════════════════════╗${NC}"
+echo -e "${BLUE}║    ${YELLOW}Sistema MPI Heterogéneo OpenMPI 4.1.6${BLUE}    ║${NC}"
+echo -e "${BLUE}╚══════════════════════════════════════════════╝${NC}\n"
+
+# ===== Validaciones =====
+if [ ! -f "$HOSTFILE" ]; then
+    echo -e "${RED}✗ ERROR: No se encuentra $HOSTFILE${NC}"
+    exit 1
+fi
+
+if [ ! -f "$EXECUTABLE" ]; then
+    echo -e "${RED}✗ ERROR: No se encuentra el ejecutable $EXECUTABLE${NC}"
+    exit 1
+fi
+
+if [ ! -x "$MPI_PATH/bin/mpirun" ]; then
+    echo -e "${RED}✗ ERROR: OpenMPI no está instalado en $MPI_PATH${NC}"
+    exit 1
+fi
+
+# ===== Verificar nodos =====
+echo -e "${YELLOW}▶ Escaneando clúster...${NC}\n"
+
+: > "$TEMP_HOSTFILE"
+available_nodes=0
+total_slots=0
+configured_nodes=0
+
+# Leer hostfile y verificar cada nodo
+while IFS= read -r line; do
+    # Saltar comentarios y líneas vacías
+    [[ "$line" =~ ^#.*$ ]] || [ -z "$line" ] && continue
+    
+    # Extraer host y slots
+    host=$(echo "$line" | awk '{print $1}')
+    slots=$(echo "$line" | grep -o 'slots=[0-9]*' | cut -d= -f2)
+    [ -z "$slots" ] && slots=$DEFAULT_SLOTS
+    
+    configured_nodes=$((configured_nodes + 1))
+    
+    printf "  Verificando %-20s " "$host"
+    
+    if check_node "$host" "$TIMEOUT"; then
+        arch=$(get_arch "$host")
+        echo -e "${GREEN}✓${NC} ONLINE [${arch}] (slots=$slots)"
+        echo "$host slots=$slots" >> "$TEMP_HOSTFILE"
+        available_nodes=$((available_nodes + 1))
+        total_slots=$((total_slots + slots))
+    else
+        echo -e "${RED}✗${NC} OFFLINE"
+    fi
+done < "$HOSTFILE"
+
+# ===== Resumen de disponibilidad =====
+echo -e "\n${YELLOW}▶ Resumen del clúster:${NC}"
+echo "  • Nodos configurados: $configured_nodes"
+echo "  • Nodos disponibles:  $available_nodes"
+echo "  • Slots totales:      $total_slots"
+
+if [ "$available_nodes" -eq 0 ]; then
+    echo -e "\n${RED}✗ ERROR: No hay nodos disponibles${NC}"
+    rm -f "$TEMP_HOSTFILE"
+    exit 1
+fi
+
+# ===== Determinar número de procesos =====
+if [ -n "$FORCE_NPROCS" ]; then
+    NPROCS=$FORCE_NPROCS
+    if [ "$NPROCS" -gt "$total_slots" ]; then
+        echo -e "\n${YELLOW}⚠ Advertencia: Solicitaste $NPROCS procesos pero solo hay $total_slots slots${NC}"
+        echo -e "  Ajustando a $total_slots procesos..."
+        NPROCS=$total_slots
+    fi
+else
+    NPROCS=$total_slots
+fi
+
+# ===== Ejecutar MPI =====
+echo -e "\n${BLUE}▶ Ejecutando MPI con $NPROCS procesos en $available_nodes nodos${NC}\n"
+echo -e "${YELLOW}════════════════════════════════════════════════${NC}\n"
+
+# Construir comando MPI con opciones para heterogeneidad
+$MPI_PATH/bin/mpirun \
+    --hostfile "$TEMP_HOSTFILE" \
+    --np "$NPROCS" \
+    --hetero \
+    --map-by node \
+    --bind-to core \
+    --report-bindings \
+    -x PATH \
+    -x LD_LIBRARY_PATH \
+    "$EXECUTABLE"
+
+EXIT_CODE=$?
+
+echo -e "\n${YELLOW}════════════════════════════════════════════════${NC}"
+
+# ===== Limpieza =====
+rm -f "$TEMP_HOSTFILE"
+
+# ===== Resultado final =====
+if [ $EXIT_CODE -eq 0 ]; then
+    echo -e "\n${GREEN}✓ Ejecución completada exitosamente${NC}\n"
+else
+    echo -e "\n${RED}✗ Error en la ejecución (código: $EXIT_CODE)${NC}\n"
+fi
+
+exit $EXIT_CODE
+```
+
+### Hacer ejecutable y copiar globalmente:
+```bash
+chmod +x ~/Documents/Proyecto2-SO/ClusterSystem/run_mpi_safe.sh
+sudo cp ~/Documents/Proyecto2-SO/ClusterSystem/run_mpi_safe.sh /usr/local/bin/mpirun-safe
 sudo chmod +x /usr/local/bin/mpirun-safe
 ```
 
-### 6.3) Uso del script
+---
 
-Desde cualquier directorio donde esté tu ejecutable MPI:
+## 7) Ejecución del clúster
 
+### Método 1: Con script seguro (RECOMENDADO)
 ```bash
 cd ~/Documents/Proyecto2-SO/ClusterSystem
 mpirun-safe
 ```
 
-**Salida esperada:**
-
+### Método 2: Ejecución directa
+```bash
+cd ~/Documents/Proyecto2-SO/ClusterSystem
+/opt/openmpi-4.1.6/bin/mpirun \
+    --hostfile ~/.mpi_hostfile \
+    --np 4 \
+    --hetero \
+    --map-by node \
+    ./ejemplo
 ```
-=== Sistema MPI Robusto ===
 
-Verificando disponibilidad de nodos...
+---
 
-Verificando 192.168.18.10... ✓ DISPONIBLE
-Verificando 192.168.18.241... ✓ DISPONIBLE
-Verificando 192.168.18.99... ✗ NO DISPONIBLE
+## 8) Verificación y troubleshooting
 
-Resumen:
-  Total de nodos configurados: 4
-  Nodos disponibles: 2
+### Verificar conectividad SSH:
+```bash
+for host in localhost slave1 slave2 slave3; do
+    echo -n "Testing $host: "
+    ssh -o BatchMode=yes $host 'echo OK' 2>/dev/null && echo "✓" || echo "✗"
+done
+```
 
-Ejecutando MPI con 2 procesos en 2 nodos...
+### Verificar OpenMPI en todos los nodos:
+```bash
+for host in localhost slave1 slave2 slave3; do
+    echo "=== $host ==="
+    ssh $host '/opt/openmpi-4.1.6/bin/ompi_info | grep -E "heterogeneous|Open MPI:"'
+done
+```
 
-Hola desde el proceso 0 de 2
-Hola desde el proceso 1 de 2
+### Verificar que el ejecutable existe en todos los nodos:
+```bash
+for host in localhost slave1 slave2 slave3; do
+    ssh $host "ls -l ~/Documents/Proyecto2-SO/ClusterSystem/ejemplo" 2>/dev/null || echo "$host: No encontrado"
+done
+```
+
+### Test simple local:
+```bash
+cd ~/Documents/Proyecto2-SO/ClusterSystem
+/opt/openmpi-4.1.6/bin/mpirun -np 2 ./ejemplo
+```
+
+---
+
+## 🎯 Resultado esperado
+
+Al ejecutar `mpirun-safe`, deberías ver algo así:
+```
+╔══════════════════════════════════════════════╗
+║    Sistema MPI Heterogéneo OpenMPI 4.1.6    ║
+╚══════════════════════════════════════════════╝
+
+▶ Escaneando clúster...
+
+  Verificando 192.168.18.242      ✓ ONLINE [armv7l] (slots=2)
+  Verificando 192.168.18.10       ✓ ONLINE [x86_64] (slots=2)
+  Verificando 192.168.18.241      ✓ ONLINE [x86_64] (slots=2)
+  Verificando 192.168.18.90       ✗ OFFLINE
+
+▶ Resumen del clúster:
+  • Nodos configurados: 4
+  • Nodos disponibles:  3
+  • Slots totales:      6
+
+▶ Ejecutando MPI con 6 procesos en 3 nodos
+
+════════════════════════════════════════════════
+
+Hola desde proceso externo 0 de 6 total | Host: raspberrypi | Arch: ARM | PID: 12345
+Hola desde proceso externo 1 de 6 total | Host: raspberrypi | Arch: ARM | PID: 12346
+Hola desde proceso externo 2 de 6 total | Host: slave1 | Arch: x86_64 | PID: 23456
+Hola desde proceso externo 3 de 6 total | Host: slave1 | Arch: x86_64 | PID: 23457
+Hola desde proceso externo 4 de 6 total | Host: slave2 | Arch: x86_64 | PID: 34567
+Hola desde proceso externo 5 de 6 total | Host: slave2 | Arch: x86_64 | PID: 34568
+
+=== Ejecución MPI Heterogénea Completada ===
+Total de procesos: 6
+
+════════════════════════════════════════════════
 
 ✓ Ejecución completada exitosamente
 ```
 
-### 6.4) Ventajas de usar `mpirun-safe`
+---
 
-✅ **Detecta automáticamente** qué slaves están encendidos  
-✅ **Nunca crashea** si un slave está apagado  
-✅ **Reporte visual claro** del estado del clúster  
-✅ **No requiere editar manualmente** el hostfile  
-✅ **Ejecuta con todos los nodos disponibles** automáticamente  
-✅ **Portable**: Funciona desde cualquier directorio  
+## 📌 Notas importantes
+
+1. **Heterogeneidad**: OpenMPI 4.1.6 maneja automáticamente las diferencias de arquitectura con `--hetero`
+2. **Sincronización**: Todos los nodos deben tener el ejecutable en la misma ruta
+3. **Bibliotecas**: Las rutas de OpenMPI deben ser idénticas en todos los nodos
+4. **SSH**: La autenticación sin contraseña es obligatoria
+5. **Firewall**: Asegúrate de que los puertos MPI no estén bloqueados
 
 ---
 
-## 7) Ejecuta el clúster (método tradicional)
+## 🛠️ Solución de problemas comunes
 
-> **Nota:** Si instalaste `mpirun-safe` (sección 6), **úsalo siempre** en lugar de estos comandos. Los métodos a continuación funcionan pero **fallarán** si algún slave del hostfile está apagado.
-
-* **Con la variable `HYDRA_HOST_FILE`**:
-
-  ```bash
-  mpiexec -n 4 -env DISPLAY "" ./ejemplo
-  ```
-
-* **O pasando el hostfile explícito**:
-
-  ```bash
-  mpiexec -f ~/.mpi_hostfile -n 4 -env DISPLAY "" ./ejemplo
-  ```
-
-* **Si necesitas fijar interfaz/IP del launcher** (ruteo estricto):
-
-  ```bash
-  mpiexec -iface 192.168.18.242 -f ~/.mpi_hostfile -n 4 -env DISPLAY "" ./ejemplo
-  ```
-
-**Salida esperada:**
-
-```
-Hola desde el proceso 0 de 4
-Hola desde el proceso 1 de 4
-Hola desde el proceso 2 de 4
-Hola desde el proceso 3 de 4
-```
-
----
-
-## 8) Verificaciones rápidas (cuando algo no corre)
-
+### Error: "cannot open shared object file"
 ```bash
-# SSH sin password hacia cada host
-ssh -o BatchMode=yes adriel@192.168.18.10  'true' && echo OK1 || echo FAIL1
-ssh -o BatchMode=yes adriel@192.168.18.241 'true' && echo OK2 || echo FAIL2
-
-# MPICH presente en remotos
-ssh adriel@192.168.18.10  'bash -lc "which mpiexec && echo LD=$LD_LIBRARY_PATH"'
-ssh adriel@192.168.18.241 'bash -lc "which mpiexec && echo LD=$LD_LIBRARY_PATH"'
-
-# Binario en misma ruta
-ssh adriel@192.168.18.10  'bash -lc "ls -l ~/Documents/Proyecto2-SO/ClusterSystem/ejemplo"'
-ssh adriel@192.168.18.241 'bash -lc "ls -l ~/Documents/Proyecto2-SO/ClusterSystem/ejemplo"'
+# En todos los nodos:
+sudo ldconfig
+source ~/.bashrc
 ```
 
----
-
-**Compilacion en cada nodo**:
-
+### Error: "Permission denied (publickey)"
 ```bash
-cd ~/Documents/Proyecto2-SO/ClusterSystem
-/usr/local/mpich-4.3.2/bin/mpicc ejemplo.c -o ejemplo
+# Desde el master:
+ssh-copy-id adriel@nodo_problemático
+```
+
+### Error: "heterogeneous run attempted"
+```bash
+# Verificar que --hetero esté habilitado:
+ompi_info | grep heterogeneous
+# Debe mostrar: "Heterogeneous support: yes"
 ```
 
 ---
 
-## 🎯 Resumen de flujo de trabajo recomendado
-
-1. **Configura todos los nodos** (secciones 0-5)
-2. **Instala `mpirun-safe`** (sección 6)
-3. **Compila tu código** en todos los nodos
-4. **Ejecuta con `mpirun-safe`** desde el master
-5. **¡Disfruta de un clúster resiliente!** 🚀
-
----
-
-**Con esto tienes un clúster Beowulf heterogéneo completamente funcional y robusto, que tolera nodos caídos sin problemas.**
+¡Con esta configuración tendrás un clúster Beowulf heterogéneo totalmente funcional! 🚀
