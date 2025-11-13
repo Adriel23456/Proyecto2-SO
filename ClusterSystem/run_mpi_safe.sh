@@ -1,5 +1,5 @@
 #!/bin/bash
-# Script: run_mpi_safe.sh
+# Script: mpirun-safe
 # Ejecuta MPI solo con nodos disponibles en clúster heterogéneo
 
 # ===== Configuración =====
@@ -31,8 +31,8 @@ while [[ $# -gt 0 ]]; do
         -h|--help)
             echo "Uso: $0 [opciones]"
             echo "  -e, --executable PROG   Ejecutable MPI (default: ./ejemplo)"
-            echo "  -n, --nprocs N         Forzar número de procesos"
-            echo "  -h, --help             Mostrar esta ayuda"
+            echo "  -n, --nprocs N          Forzar número de procesos"
+            echo "  -h, --help              Mostrar esta ayuda"
             exit 0
             ;;
         *)
@@ -92,22 +92,40 @@ total_slots=0
 configured_nodes=0
 
 # Leer hostfile y verificar cada nodo
-while IFS= read -r line; do
+# (el "|| [[ -n $line ]]" es para que no se pierda la última línea si no termina en \n)
+while IFS= read -r line || [[ -n "$line" ]]; do
+    # Recortar espacios al inicio y final
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+
     # Saltar comentarios y líneas vacías
-    [[ "$line" =~ ^#.*$ ]] || [ -z "$line" ] && continue
-    
-    # Extraer host y slots
-    host=$(echo "$line" | awk '{print $1}')
-    slots=$(echo "$line" | grep -o 'slots=[0-9]*' | cut -d= -f2)
+    if [[ -z "$line" ]] || [[ "$line" =~ ^# ]]; then
+        continue
+    fi
+
+    # Primer campo = host (IP o hostname)
+    host=$(awk '{print $1}' <<< "$line")
+
+    # Buscar sólo el parámetro slots=N (ignorando max_slots)
+    slots=$(awk '{
+        for (i = 1; i <= NF; i++) {
+            if ($i ~ /^slots=[0-9]+$/) {
+                split($i,a,"=");
+                print a[2];
+                exit;
+            }
+        }
+    }' <<< "$line")
+
     [ -z "$slots" ] && slots=$DEFAULT_SLOTS
-    
+
     configured_nodes=$((configured_nodes + 1))
-    
+
     printf "  Verificando %-20s " "$host"
-    
+
     if check_node "$host" "$TIMEOUT"; then
         arch=$(get_arch "$host")
-        echo -e "${GREEN}✓${NC} ONLINE [${arch}] (slots=$slots)"
+        echo -e "${GREEN}✓${NC} ONLINE [${arch}] (slots=${slots})"
         echo "$host slots=$slots" >> "$TEMP_HOSTFILE"
         available_nodes=$((available_nodes + 1))
         total_slots=$((total_slots + slots))
@@ -144,8 +162,7 @@ fi
 echo -e "\n${BLUE}▶ Ejecutando MPI con $NPROCS procesos en $available_nodes nodos${NC}\n"
 echo -e "${YELLOW}════════════════════════════════════════════════${NC}\n"
 
-# Construir comando MPI con opciones para heterogeneidad
-$MPI_PATH/bin/mpirun \
+"$MPI_PATH/bin/mpirun" \
     --hostfile "$TEMP_HOSTFILE" \
     --np "$NPROCS" \
     --map-by node \
