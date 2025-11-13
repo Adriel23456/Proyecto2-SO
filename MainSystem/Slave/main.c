@@ -185,7 +185,7 @@ int main(int argc, char** argv) {
     double start_time, end_time;
     
     // ========================================================================
-    // PASO 1: Inicializar MPI
+    // PASO 1: Inicializar MPI y OpenMP
     // ========================================================================
     
     MPI_Init(&argc, &argv);
@@ -193,6 +193,32 @@ int main(int argc, char** argv) {
     MPI_Comm_size(MPI_COMM_WORLD, &world_size);
     
     start_time = MPI_Wtime();
+
+    #ifdef _OPENMP
+    #include <omp.h>
+    #include <unistd.h>
+
+    // Configurar threads al 75% de cores disponibles
+    int configure_openmp_threads() {
+        int num_cores = sysconf(_SC_NPROCESSORS_ONLN);
+        int num_threads = (num_cores * 75) / 100;  // 75% de los cores
+        
+        if (num_threads < 1) num_threads = 1;
+        
+        // Configurar OpenMP
+        omp_set_num_threads(num_threads);
+        
+        printf("[SLAVE] Sistema tiene %d cores, configurando %d threads OpenMP (75%%)\n", 
+            num_cores, num_threads);
+        
+        return num_threads;
+    }
+    #endif
+
+    // En el main del slave, después de verificar que es un slave:
+    #ifdef _OPENMP
+        configure_openmp_threads();
+    #endif
     
     // ========================================================================
     // PASO 2: Verificar que este proceso NO es el Master

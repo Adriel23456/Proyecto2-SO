@@ -115,32 +115,38 @@ GrayscaleImage* apply_sobel_filter(const GrayscaleImage *img, const SobelMask *m
             for (int x = 1; x < img->width - 1; x++) {
                 // Aplicar Sobel X (gradiente horizontal)
                 float gx = apply_convolution_3x3(img, x, y, mask->sobel_x);
-                
+
                 // Aplicar Sobel Y (gradiente vertical)
                 float gy = apply_convolution_3x3(img, x, y, mask->sobel_y);
-                
+
                 // Calcular magnitud del gradiente: sqrt(Gx² + Gy²)
                 float magnitude = sqrtf(gx * gx + gy * gy);
-                
+
                 // Normalizar y guardar resultado
                 int out_idx = y * img->width + x;
                 output->data[out_idx] = clamp_to_byte(magnitude);
             }
-            
+
             // Actualizar progreso (thread-safe)
             #pragma omp atomic
             processed_pixels += (img->width - 2);
-            
-            // Mostrar progreso desde un solo thread
-            #pragma omp master
-            {
-                if (total_inner_pixels > 0) {
-                    int progress = (processed_pixels * 100) / total_inner_pixels;
+
+            if (total_inner_pixels > 0) {
+                int progress = (processed_pixels * 100) / total_inner_pixels;
+
+                // Solo un hilo a la vez evalúa/imprime
+                #pragma omp critical
+                {
+                    // Opcional: solo el thread 0
+                    // if (omp_get_thread_num() == 0) {
+
                     if (progress >= last_progress + 10) {
                         printf("[SLAVE]   Progreso: %d%%\n", progress);
                         fflush(stdout);
                         last_progress = progress;
                     }
+
+                    // }
                 }
             }
         }
