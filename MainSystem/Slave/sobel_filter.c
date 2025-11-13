@@ -1,6 +1,6 @@
 /***************************************************************************//**
 *  \file       sobel_filter.c
-*  \brief      Implementación del filtro Sobel para detección de bordes
+*  \brief      Implementación del filtro Sobel con paralelización OpenMP
 *  \details    Aplica operadores Sobel X e Y y calcula magnitud del gradiente
 *******************************************************************************/
 
@@ -8,6 +8,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 // ============================================================================
 // FUNCIONES AUXILIARES
@@ -53,7 +57,7 @@ static uint8_t clamp_to_byte(float value) {
 }
 
 // ============================================================================
-// IMPLEMENTACIÓN: Filtro Sobel
+// IMPLEMENTACIÓN: Filtro Sobel con OpenMP
 // ============================================================================
 
 GrayscaleImage* apply_sobel_filter(const GrayscaleImage *img, const SobelMask *mask) {
@@ -63,6 +67,19 @@ GrayscaleImage* apply_sobel_filter(const GrayscaleImage *img, const SobelMask *m
     }
     
     printf("[SLAVE] Aplicando filtro Sobel a imagen %dx%d\n", img->width, img->height);
+    
+    // Mostrar información de OpenMP
+    #ifdef _OPENMP
+    #pragma omp parallel
+    {
+        #pragma omp single
+        {
+            printf("[SLAVE] OpenMP activado: usando %d threads\n", omp_get_num_threads());
+        }
+    }
+    #else
+    printf("[SLAVE] OpenMP NO activado (ejecución secuencial)\n");
+    #endif
     
     // Crear imagen de salida
     GrayscaleImage *output = (GrayscaleImage*)malloc(sizeof(GrayscaleImage));
@@ -83,10 +100,53 @@ GrayscaleImage* apply_sobel_filter(const GrayscaleImage *img, const SobelMask *m
         return NULL;
     }
     
-    // Aplicar filtro Sobel a cada pixel (excepto bordes)
+    // Variables para progreso (compartidas entre threads)
     int processed_pixels = 0;
     int total_inner_pixels = (img->width - 2) * (img->height - 2);
+    int last_progress = 0;
     
+    // PARALELIZACIÓN CON OpenMP
+    #ifdef _OPENMP
+    #pragma omp parallel
+    {
+        // Cada thread procesa un subconjunto de filas
+        #pragma omp for schedule(dynamic, 10) nowait
+        for (int y = 1; y < img->height - 1; y++) {
+            for (int x = 1; x < img->width - 1; x++) {
+                // Aplicar Sobel X (gradiente horizontal)
+                float gx = apply_convolution_3x3(img, x, y, mask->sobel_x);
+                
+                // Aplicar Sobel Y (gradiente vertical)
+                float gy = apply_convolution_3x3(img, x, y, mask->sobel_y);
+                
+                // Calcular magnitud del gradiente: sqrt(Gx² + Gy²)
+                float magnitude = sqrtf(gx * gx + gy * gy);
+                
+                // Normalizar y guardar resultado
+                int out_idx = y * img->width + x;
+                output->data[out_idx] = clamp_to_byte(magnitude);
+            }
+            
+            // Actualizar progreso (thread-safe)
+            #pragma omp atomic
+            processed_pixels += (img->width - 2);
+            
+            // Mostrar progreso desde un solo thread
+            #pragma omp master
+            {
+                if (total_inner_pixels > 0) {
+                    int progress = (processed_pixels * 100) / total_inner_pixels;
+                    if (progress >= last_progress + 10) {
+                        printf("[SLAVE]   Progreso: %d%%\n", progress);
+                        fflush(stdout);
+                        last_progress = progress;
+                    }
+                }
+            }
+        }
+    }
+    #else
+    // Versión secuencial (sin OpenMP)
     for (int y = 1; y < img->height - 1; y++) {
         for (int x = 1; x < img->width - 1; x++) {
             // Aplicar Sobel X (gradiente horizontal)
@@ -113,6 +173,7 @@ GrayscaleImage* apply_sobel_filter(const GrayscaleImage *img, const SobelMask *m
             fflush(stdout);
         }
     }
+    #endif
     
     printf("[SLAVE]   Progreso: 100%%\n");
     printf("[SLAVE] ✓ Filtro Sobel aplicado exitosamente\n");
