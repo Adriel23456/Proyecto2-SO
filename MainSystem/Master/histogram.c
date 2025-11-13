@@ -407,42 +407,44 @@ bool generate_histogram_cvc(const Histogram *hist, const char *filename) {
     
     printf("[MASTER]   Escribiendo barras del histograma...\n");
     
-    // PASO 2: Dibujar barras del histograma
-    int num_bars = HISTOGRAM_BINS;  // 256 barras (una por cada nivel de gris)
-    
-    // Agrupar bins para que quepan en el LCD (240 pixeles de ancho)
-    int bins_per_bar = (num_bars + LCD_WIDTH - 1) / LCD_WIDTH;  // Redondear arriba
-    int actual_bars = (num_bars + bins_per_bar - 1) / bins_per_bar;
-    
-    for (int bar = 0; bar < actual_bars && bar < LCD_WIDTH; bar++) {
-        // Calcular altura promedio de los bins agrupados
-        uint32_t total_freq = 0;
-        int bin_start = bar * bins_per_bar;
-        int bin_end = (bar + 1) * bins_per_bar;
-        if (bin_end > num_bars) bin_end = num_bars;
-        
-        for (int b = bin_start; b < bin_end; b++) {
-            total_freq += hist->bins[b];
-        }
-        
-        uint32_t avg_freq = total_freq / bins_per_bar;
-        
-        // Normalizar altura a LCD_HEIGHT
-        int bar_height = (int)((float)avg_freq / max_freq * (LCD_HEIGHT - 10));
-        if (bar_height > LCD_HEIGHT - 10) bar_height = LCD_HEIGHT - 10;
-        
-        // Calcular color (arcoíris)
-        uint8_t r, g, b;
-        float hue = (360.0 * bar) / actual_bars;
-        hsv_to_rgb(hue, 0.9, 0.9, &r, &g, &b);
-        uint16_t bar_color = rgb_to_rgb565(r, g, b);
-        
-        // Dibujar barra
-        int y_start = LCD_HEIGHT - bar_height;
-        int y_end = LCD_HEIGHT - 1;
-        
-        for (int y = y_start; y <= y_end; y++) {
-            fprintf(fp, "%d\t%d\t%u\n", bar, y, bar_color);
+    // PASO 2: Dibujar barras del histograma mapeando 0–255 a 0–(LCD_WIDTH-1)
+    if (max_freq == 0) {
+        printf("[MASTER]   Histograma vacío, no se dibujan barras\n");
+    } else {
+        for (int x = 0; x < LCD_WIDTH; x++) {
+            // Rango de bins (niveles de gris) que caen en esta columna x
+            int bin_start = (x * HISTOGRAM_BINS) / LCD_WIDTH;
+            int bin_end   = ((x + 1) * HISTOGRAM_BINS) / LCD_WIDTH;
+            if (bin_end <= bin_start) bin_end = bin_start + 1;
+            if (bin_end > HISTOGRAM_BINS) bin_end = HISTOGRAM_BINS;
+
+            uint32_t total_freq = 0;
+            int bins_in_group = 0;
+            for (int b = bin_start; b < bin_end; b++) {
+                total_freq += hist->bins[b];
+                bins_in_group++;
+            }
+
+            uint32_t avg_freq = (bins_in_group > 0) ? (total_freq / bins_in_group) : 0;
+
+            // Normalizar altura a LCD_HEIGHT
+            int bar_height = (int)((float)avg_freq / max_freq * (LCD_HEIGHT - 10));
+            if (bar_height < 0) bar_height = 0;
+            if (bar_height > LCD_HEIGHT - 10) bar_height = LCD_HEIGHT - 10;
+
+            // Color arcoíris según posición x (no según bar)
+            uint8_t r, g, b;
+            float hue = (360.0f * x) / (float)LCD_WIDTH;
+            hsv_to_rgb(hue, 0.9f, 0.9f, &r, &g, &b);
+            uint16_t bar_color = rgb_to_rgb565(r, g, b);
+
+            int y_start = LCD_HEIGHT - bar_height;
+            int y_end   = LCD_HEIGHT - 1;
+
+            for (int y = y_start; y <= y_end; y++) {
+                if (y < 0 || y >= LCD_HEIGHT) continue;
+                fprintf(fp, "%d\t%d\t%u\n", x, y, bar_color);
+            }
         }
     }
     
