@@ -282,23 +282,30 @@ bool generate_histogram_png(const Histogram *hist, const char *filename) {
     }
     
     // ===== Dibujar barras del histograma =====
-    int bar_width = plot_width / HISTOGRAM_BINS;
-    if (bar_width < 1) bar_width = 1;
-    
+    //
+    //  Mapeamos 0–255 -> TODO el ancho de plot_width.
+    //  Para cada bin i:
+    //    x ∈ [x0, x1) donde:
+    //      x0 = plot_left  + (i    * plot_width) / HISTOGRAM_BINS
+    //      x1 = plot_left  + ((i+1)* plot_width) / HISTOGRAM_BINS
+    //
     for (int i = 0; i < HISTOGRAM_BINS; i++) {
         int bar_height = (int)((float)hist->bins[i] / max_freq * (float)plot_height);
         if (bar_height <= 0) continue;
         
-        int x_base  = plot_left + i * bar_width;
         int y_start = plot_bottom - bar_height;
         int y_end   = plot_bottom;
         
-        for (int y = y_start; y < y_end; y++) {
-            if (y < plot_top || y > plot_bottom) continue;
-            for (int bx = 0; bx < bar_width; bx++) {
-                int px = x_base + bx;
-                if (px < plot_left || px > plot_right) continue;
-                set_pixel(img_data, img_width, img_height, px, y, bar_r, bar_g, bar_b);
+        int x0 = plot_left + (i * plot_width) / HISTOGRAM_BINS;
+        int x1 = plot_left + ((i + 1) * plot_width) / HISTOGRAM_BINS;
+        if (x1 > plot_right) x1 = plot_right;
+        if (x1 <= x0) continue;
+        
+        for (int x = x0; x < x1; x++) {
+            if (x < plot_left || x > plot_right) continue;
+            for (int y = y_start; y < y_end; y++) {
+                if (y < plot_top || y > plot_bottom) continue;
+                set_pixel(img_data, img_width, img_height, x, y, bar_r, bar_g, bar_b);
             }
         }
     }
