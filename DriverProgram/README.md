@@ -235,6 +235,7 @@ sudo ./test_tft fill FFFF00 # Amarillo (truncado a FFE0)
 ```bash
 # Generar imagen de ejemplo
 ./generate_histogram
+cp ~/Documents/Proyecto2-SO/MainSystem/Master/result_histogram.cvc .
 
 # Mostrar en pantalla
 sudo ./test_tft cvc histogram.cvc

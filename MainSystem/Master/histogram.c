@@ -144,9 +144,16 @@ bool generate_histogram_png(const Histogram *hist, const char *filename) {
             max_freq = hist->bins[i];
         }
     }
+    if (max_freq == 0) {
+        free(img_data);
+        fprintf(stderr, "[WARN] Histograma vacío, nada que dibujar\n");
+        return false;
+    }
     
-    // Dibujar barras del histograma
+    // Ancho de barra (al menos 1 píxel)
     int bar_width = (img_width - 2 * padding) / HISTOGRAM_BINS;
+    if (bar_width < 1) bar_width = 1;
+    
     int max_bar_height = img_height - 2 * padding;
     
     for (int i = 0; i < HISTOGRAM_BINS; i++) {
@@ -155,21 +162,22 @@ bool generate_histogram_png(const Histogram *hist, const char *filename) {
         int y_start = img_height - padding - bar_height;
         int y_end = img_height - padding;
         
+        if (bar_height <= 0) continue;
+        
         // Dibujar barra (azul oscuro)
         for (int y = y_start; y < y_end; y++) {
-            for (int bx = 0; bx < bar_width - 1; bx++) {
+            if (y < 0 || y >= img_height) continue;
+            for (int bx = 0; bx < bar_width; bx++) {  // <-- SIN "- 1"
                 int px = x + bx;
-                if (px < img_width) {
-                    int idx = (y * img_width + px) * 3;
-                    img_data[idx + 0] = 50;   // R
-                    img_data[idx + 1] = 100;  // G
-                    img_data[idx + 2] = 200;  // B
-                }
+                if (px < 0 || px >= img_width) continue;
+                int idx = (y * img_width + px) * 3;
+                img_data[idx + 0] = 50;   // R
+                img_data[idx + 1] = 100;  // G
+                img_data[idx + 2] = 200;  // B
             }
         }
     }
     
-    // Guardar imagen
     int result = stbi_write_png(filename, img_width, img_height, 3, img_data, img_width * 3);
     free(img_data);
     
