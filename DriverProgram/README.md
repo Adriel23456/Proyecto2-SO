@@ -198,6 +198,11 @@ sudo cp libtft.h /usr/local/include/
 sudo ldconfig
 ```
 
+### Dar permisos (opcional, o usar sudo)
+```bash
+sudo chmod 666 /dev/tft_device
+```
+
 **Salida esperada:**
 ```
 tft_driver      12288  0
@@ -212,11 +217,6 @@ ls -l /dev/tft_device
 **Salida esperada:**
 ```
 crw------- 1 root root 240, 0 Nov 10 12:00 /dev/tft_device
-```
-
-### Dar permisos (opcional, o usar sudo)
-```bash
-sudo chmod 666 /dev/tft_device
 ```
 
 ---
