@@ -24,8 +24,6 @@ sudo chmod +x /usr/local/bin/mpirun-safe
 
 mpirun-safe ~/Documents/Proyecto2-SO/MainSystem/Master/image.png
 
-cd ~/Documents/Proyecto2-SO/MainSystem/Master
-
 scp result.png result_histogram.cvc result_histogram.png \
     adriel@adriel-System:~/Documents/Proyecto2-SO/MainSystem/Slave/
 ------------------------------------------

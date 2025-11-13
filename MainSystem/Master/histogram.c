@@ -11,8 +11,108 @@
 #include <math.h>
 
 // ============================================================================
-// FUNCIONES AUXILIARES PARA CONVERSIÓN DE COLOR
+// Helpers de dibujo básico (para el PNG)
 // ============================================================================
+
+static void set_pixel(uint8_t *img, int width, int height,
+                      int x, int y,
+                      uint8_t r, uint8_t g, uint8_t b)
+{
+    if (x < 0 || x >= width || y < 0 || y >= height) return;
+    int idx = (y * width + x) * 3;
+    img[idx + 0] = r;
+    img[idx + 1] = g;
+    img[idx + 2] = b;
+}
+
+// Fuente 5x7 muy simple para unas pocas letras y dígitos
+typedef struct {
+    char ch;
+    uint8_t rows[7];   // 5 bits útiles por fila (de izquierda a derecha)
+} Glyph5x7;
+
+static const Glyph5x7 FONT_5x7[] = {
+    // A
+    { 'A', { 0x0E, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11 } },
+    // C
+    { 'C', { 0x0E, 0x11, 0x10, 0x10, 0x10, 0x11, 0x0E } },
+    // D
+    { 'D', { 0x1E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1E } },
+    // E
+    { 'E', { 0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x1F } },
+    // F
+    { 'F', { 0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x10 } },
+    // G
+    { 'G', { 0x0E, 0x11, 0x10, 0x17, 0x11, 0x11, 0x0E } },
+    // I
+    { 'I', { 0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x1F } },
+    // L
+    { 'L', { 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x1F } },
+    // N
+    { 'N', { 0x11, 0x19, 0x15, 0x13, 0x11, 0x11, 0x11 } },
+    // R
+    { 'R', { 0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11 } },
+    // S
+    { 'S', { 0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E } },
+    // U
+    { 'U', { 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E } },
+    // V
+    { 'V', { 0x11, 0x11, 0x11, 0x11, 0x11, 0x0A, 0x04 } },
+
+    // Dígitos 0,2,5
+    { '0', { 0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E } },
+    { '2', { 0x0E, 0x11, 0x01, 0x02, 0x04, 0x08, 0x1F } },
+    { '5', { 0x1F, 0x10, 0x10, 0x1E, 0x01, 0x01, 0x1E } },
+
+    // Espacio
+    { ' ', { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 } },
+
+    // Guion '-'
+    { '-', { 0x00, 0x00, 0x00, 0x0E, 0x00, 0x00, 0x00 } },
+
+    // Paréntesis
+    { '(', { 0x06, 0x08, 0x10, 0x10, 0x10, 0x08, 0x06 } },
+    { ')', { 0x0C, 0x02, 0x01, 0x01, 0x01, 0x02, 0x0C } },
+};
+
+static const int FONT_COUNT_5x7 = sizeof(FONT_5x7) / sizeof(FONT_5x7[0]);
+
+static const Glyph5x7* find_glyph_5x7(char c)
+{
+    for (int i = 0; i < FONT_COUNT_5x7; i++) {
+        if (FONT_5x7[i].ch == c) return &FONT_5x7[i];
+    }
+    return NULL; // sin glyph -> no dibujar
+}
+
+static void draw_char_5x7(uint8_t *img, int width, int height,
+                          int x, int y, char c,
+                          uint8_t r, uint8_t g, uint8_t b)
+{
+    const Glyph5x7 *glyph = find_glyph_5x7(c);
+    if (!glyph) return;
+
+    for (int row = 0; row < 7; row++) {
+        uint8_t bits = glyph->rows[row];
+        for (int col = 0; col < 5; col++) {
+            // Bit 4 = columna izquierda, bit 0 = derecha
+            if (bits & (1 << (4 - col))) {
+                set_pixel(img, width, height, x + col, y + row, r, g, b);
+            }
+        }
+    }
+}
+
+static void draw_text_5x7(uint8_t *img, int width, int height,
+                          int x, int y, const char *text,
+                          uint8_t r, uint8_t g, uint8_t b)
+{
+    const int char_spacing = 6; // 5 px letra + 1 px espacio
+    for (const char *p = text; *p; ++p) {
+        draw_char_5x7(img, width, height, x, y, *p, r, g, b);
+        x += char_spacing;
+    }
+}
 
 // Helper para escribir un píxel RGB en el buffer de imagen
 static void set_pixel(uint8_t *img, int width, int height,
@@ -134,8 +234,6 @@ bool generate_histogram_png(const Histogram *hist, const char *filename) {
     }
     
     printf("[MASTER] Generando imagen PNG del histograma: %s\n", filename);
-    printf("[MASTER]   Eje X: nivel de gris (0 = negro, 255 = blanco)\n");
-    printf("[MASTER]   Eje Y: frecuencia de píxeles para cada nivel de gris\n");
     
     const int img_width  = 512;
     const int img_height = 320;
@@ -173,9 +271,10 @@ bool generate_histogram_png(const Histogram *hist, const char *filename) {
     }
     
     // Colores
-    const uint8_t bar_r = 50,  bar_g = 100, bar_b = 200; // barras
-    const uint8_t frame_r = 0, frame_g = 0, frame_b = 0; // marco/ejes
-    const uint8_t grid_r = 200, grid_g = 200, grid_b = 200; // líneas guía
+    const uint8_t bar_r   = 50,  bar_g   = 100, bar_b   = 200; // barras
+    const uint8_t frame_r = 0,   frame_g = 0,   frame_b = 0;   // marco/ejes
+    const uint8_t grid_r  = 200, grid_g  = 200, grid_b  = 200; // líneas guía
+    const uint8_t text_r  = 0,   text_g  = 0,   text_b  = 0;   // texto negro
     
     // ===== Líneas de cuadrícula (X e Y) =====
     // X: 0%, 25%, 50%, 75%, 100% de 0–255
@@ -184,8 +283,6 @@ bool generate_histogram_png(const Histogram *hist, const char *filename) {
         for (int y = plot_top; y <= plot_bottom; y++) {
             set_pixel(img_data, img_width, img_height, x, y, grid_r, grid_g, grid_b);
         }
-        int gray_value = (255 * i) / 4;
-        printf("[MASTER]   Marca X %d%% ≈ nivel gris %d\n", i * 25, gray_value);
     }
     
     // Y: 0%, 25%, 50%, 75%, 100% de frecuencia máxima
@@ -194,8 +291,6 @@ bool generate_histogram_png(const Histogram *hist, const char *filename) {
         for (int x = plot_left; x <= plot_right; x++) {
             set_pixel(img_data, img_width, img_height, x, y, grid_r, grid_g, grid_b);
         }
-        uint32_t freq_value = (max_freq * i) / 4;
-        printf("[MASTER]   Marca Y %d%% ≈ frecuencia %u\n", i * 25, freq_value);
     }
     
     // ===== Dibujar barras del histograma =====
@@ -206,7 +301,7 @@ bool generate_histogram_png(const Histogram *hist, const char *filename) {
         int bar_height = (int)((float)hist->bins[i] / max_freq * (float)plot_height);
         if (bar_height <= 0) continue;
         
-        int x_base = plot_left + i * bar_width;
+        int x_base  = plot_left + i * bar_width;
         int y_start = plot_bottom - bar_height;
         int y_end   = plot_bottom;
         
@@ -232,6 +327,33 @@ bool generate_histogram_png(const Histogram *hist, const char *filename) {
         set_pixel(img_data, img_width, img_height, plot_right, y, frame_r, frame_g, frame_b);
     }
     
+    // ===== Etiquetas de los ejes (TEXTO DENTRO DEL PNG) =====
+    const char *xlabel = "NIVEL DE GRIS (0-255)";
+    const char *ylabel = "FRECUENCIA";
+    
+    int xlabel_len = (int)strlen(xlabel);
+    int ylabel_len = (int)strlen(ylabel);
+    
+    // Eje X: centrado abajo en el margen inferior
+    int xlabel_x = img_width / 2 - (xlabel_len * 6) / 2; // 6 px por caracter (5 + 1 espacio)
+    int xlabel_y = plot_bottom + (padding / 2) - 4;       // un poco por debajo del eje X
+    
+    if (xlabel_y + 7 < img_height) { // que quepa
+        draw_text_5x7(img_data, img_width, img_height,
+                      xlabel_x, xlabel_y, xlabel,
+                      text_r, text_g, text_b);
+    }
+    
+    // Eje Y: texto horizontal cerca del borde izquierdo
+    int ylabel_x = 5; // muy a la izquierda
+    int ylabel_y = plot_top + (plot_height / 2) - 4;
+    
+    if (ylabel_y + 7 < img_height) {
+        draw_text_5x7(img_data, img_width, img_height,
+                      ylabel_x, ylabel_y, ylabel,
+                      text_r, text_g, text_b);
+    }
+    
     // Guardar imagen
     int result = stbi_write_png(filename, img_width, img_height, 3, img_data, img_width * 3);
     free(img_data);
@@ -241,7 +363,7 @@ bool generate_histogram_png(const Histogram *hist, const char *filename) {
         return false;
     }
     
-    printf("[MASTER] ✓ Imagen PNG del histograma generada\n");
+    printf("[MASTER] ✓ Imagen PNG del histograma generada (con ejes etiquetados)\n");
     return true;
 }
 
