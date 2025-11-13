@@ -1,5 +1,5 @@
 #!/bin/bash
-# run_mpi_safe.sh - Lanzador simple MPI para OpenMPI (1 proceso por nodo)
+# run_mpi_safe.sh - Lanzador MPI optimizado para múltiples cores
 
 # ===== Configuración OpenMPI =====
 MPIRUN="/opt/openmpi-4.1.6/bin/mpirun"
@@ -8,10 +8,7 @@ MPIRUN="/opt/openmpi-4.1.6/bin/mpirun"
 APP_DIR="$HOME/Documents/Proyecto2-SO/MainSystem"
 EXECUTABLE="$APP_DIR/main"
 
-# Hostfile original (solo para referencia, ya NO se pasa directo a mpirun)
-ORIGINAL_HOSTFILE="$HOME/.mpi_hostfile"
-
-# Hosts candidatos (los que quieres usar en el cluster)
+# Hosts candidatos
 HOSTS=(localhost slave1 slave2 slave3)
 
 # ===== Argumentos a pasar al main =====
@@ -29,7 +26,6 @@ echo "==========================================="
 echo
 echo "Directorio de la app : $APP_DIR"
 echo "Ejecutable           : $EXECUTABLE"
-echo "Hostfile original    : $ORIGINAL_HOSTFILE (solo referencia)"
 echo "MPIRUN               : $MPIRUN"
 echo "Args para main       : ${EXTRA_ARGS[*]:-(ninguno)}"
 echo
@@ -45,53 +41,52 @@ if [ ! -f "$EXECUTABLE" ]; then
     exit 1
 fi
 
-# El hostfile original es opcional ahora, pero si existe lo mostramos
-if [ ! -f "$ORIGINAL_HOSTFILE" ]; then
-    echo -e "${YELLOW}Aviso:${NC} no se encontró ~/.mpi_hostfile (no es crítico para este script)"
-fi
-
 # ===== Verificar nodos y construir hostfile filtrado =====
 TEMP_HOSTFILE=$(mktemp /tmp/mpi_hosts_XXXXXX)
 AVAILABLE_HOSTS=()
-available_count=0
+total_slots=0
 
-# Detectar número de cores por nodo
-CORES_PER_NODE=4  # O usa: $(nproc) para detección automática
-
-# Construir hostfile con múltiples slots
+echo "▶ Verificando nodos y ejecutable:"
 for host in "${HOSTS[@]}"; do
     printf "  %s: " "$host"
     if ssh -o BatchMode=yes -o ConnectTimeout=3 "$host" "ls -l '$EXECUTABLE'" >/dev/null 2>&1; then
         echo -e "${GREEN}OK${NC}"
         AVAILABLE_HOSTS+=("$host")
-        # ⭐ CAMBIO CRÍTICO: Múltiples slots por nodo
-        echo "$host slots=$CORES_PER_NODE" >> "$TEMP_HOSTFILE"
-        available_count=$((available_count + CORES_PER_NODE))
+        
+        # Detectar número de cores disponibles en cada nodo
+        cores=$(ssh -o BatchMode=yes -o ConnectTimeout=3 "$host" "nproc" 2>/dev/null)
+        
+        # Usar la mitad de los cores disponibles (para balance)
+        # O puedes usar todos cambiando a: slots=$cores
+        slots=$((cores / 2))
+        if [ "$slots" -lt 1 ]; then
+            slots=1
+        fi
+        
+        echo "    Cores detectados: $cores, usando slots: $slots"
+        echo "$host slots=$slots" >> "$TEMP_HOSTFILE"
+        total_slots=$((total_slots + slots))
     else
         echo -e "${YELLOW}No encontrado${NC}"
     fi
 done
 
-# Actualizar número total de procesos
-NPROCS="$available_count"
-
 echo
-echo "Nodos disponibles con '$EXECUTABLE': $available_count"
+echo "Slots totales disponibles: $total_slots"
 
-if [ "$available_count" -eq 0 ]; then
+if [ "$total_slots" -eq 0 ]; then
     echo -e "${RED}ERROR:${NC} no hay nodos con el ejecutable disponible. Abortando."
     rm -f "$TEMP_HOSTFILE"
     exit 1
 fi
 
-# ===== 1 proceso por nodo disponible =====
-NPROCS="$available_count"
+# Usar todos los slots disponibles
+NPROCS="$total_slots"
 echo "Procesos totales a lanzar (-np): $NPROCS"
 echo
 
-# Mostrar hostfile efectivo que SÍ usará mpirun
 echo -e "${YELLOW}Hostfile efectivo (filtrado):${NC}"
-nl -ba "$TEMP_HOSTFILE"
+cat "$TEMP_HOSTFILE"
 echo
 
 # ===== Cambiar al directorio de la app =====
@@ -101,22 +96,12 @@ cd "$APP_DIR" || {
     exit 1
 }
 
-# ===== Ejecutar mpirun con hostfile filtrado =====
+# ===== Ejecutar mpirun (CORREGIDO - sin backslashes problemáticos) =====
 echo "▶ Ejecutando mpirun..."
-echo "$MPIRUN -np $NPROCS --hostfile $TEMP_HOSTFILE --map-by node --bind-to core --report-bindings -x PATH -x LD_LIBRARY_PATH ./main ${EXTRA_ARGS[*]}"
+echo "$MPIRUN -np $NPROCS --hostfile $TEMP_HOSTFILE --map-by slot --bind-to core --report-bindings -x PATH -x LD_LIBRARY_PATH ./main ${EXTRA_ARGS[*]}"
 echo
 
-# Cambiar opciones de mpirun para mejor distribución
-"$MPIRUN" \
-    -np "$NPROCS" \
-    --hostfile "$TEMP_HOSTFILE" \
-    --map-by slot \              # Cambio: slot en lugar de node
-    --bind-to core \
-    --oversubscribe \            # Permite más procesos si es necesario
-    --report-bindings \
-    -x PATH \
-    -x LD_LIBRARY_PATH \
-    ./main "${EXTRA_ARGS[@]}"
+"$MPIRUN" -np "$NPROCS" --hostfile "$TEMP_HOSTFILE" --map-by slot --bind-to core --report-bindings -x PATH -x LD_LIBRARY_PATH ./main "${EXTRA_ARGS[@]}"
 
 EXIT_CODE=$?
 
