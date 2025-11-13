@@ -114,18 +114,6 @@ static void draw_text_5x7(uint8_t *img, int width, int height,
     }
 }
 
-// Helper para escribir un píxel RGB en el buffer de imagen
-static void set_pixel(uint8_t *img, int width, int height,
-                      int x, int y,
-                      uint8_t r, uint8_t g, uint8_t b)
-{
-    if (x < 0 || x >= width || y < 0 || y >= height) return;
-    int idx = (y * width + x) * 3;
-    img[idx + 0] = r;
-    img[idx + 1] = g;
-    img[idx + 2] = b;
-}
-
 static uint16_t rgb_to_rgb565(uint8_t r, uint8_t g, uint8_t b) {
     return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
 }
