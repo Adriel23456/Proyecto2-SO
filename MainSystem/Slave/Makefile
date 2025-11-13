@@ -2,10 +2,10 @@
 # Makefile SLAVE - Sistema de Procesamiento Distribuido de Imágenes
 # ===========================================================================
 
-# ====== Config MPICH (ajustable) ===========================================
-MPICH_ROOT ?= /usr/local/mpich-4.3.2
-MPICC      := $(MPICH_ROOT)/bin/mpicc
-RPATH_FLAG := -Wl,-rpath,$(MPICH_ROOT)/lib
+# ====== Config OpenMPI ======================================================
+OMPI_ROOT ?= /opt/openmpi-4.1.6
+MPICC     := $(OMPI_ROOT)/bin/mpicc
+RPATH_FLAG := -Wl,-rpath,$(OMPI_ROOT)/lib
 
 # ====== Flags de compilación/enlace ========================================
 CSTD   ?= c99

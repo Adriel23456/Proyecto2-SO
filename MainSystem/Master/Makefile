@@ -2,10 +2,10 @@
 # Makefile MASTER - Sistema de Procesamiento Distribuido de Imágenes
 # ===========================================================================
 
-# ====== Config MPICH (ajustable) ===========================================
-MPICH_ROOT ?= /usr/local/mpich-4.3.2
-MPICC      := $(MPICH_ROOT)/bin/mpicc
-RPATH_FLAG := -Wl,-rpath,$(MPICH_ROOT)/lib
+# ====== Config OpenMPI ======================================================
+OMPI_ROOT ?= /opt/openmpi-4.1.6
+MPICC     := $(OMPI_ROOT)/bin/mpicc
+RPATH_FLAG := -Wl,-rpath,$(OMPI_ROOT)/lib
 
 # ====== Flags de compilación/enlace ========================================
 CSTD   ?= c99
@@ -85,7 +85,7 @@ check-libs:
 
 # ---- Utilidades
 where:
-	@echo "MPICH_ROOT  = $(MPICH_ROOT)"
+	@echo "OMPI_ROOT   = $(OMPI_ROOT)"
 	@echo "MPICC       = $(MPICC)"
 	@echo "TARGET      = $(TARGET)"
 	@echo "RPATH_FLAG  = $(RPATH_FLAG)"
