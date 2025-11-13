@@ -18,6 +18,7 @@ MASTER:
 ------------------------------------------
 cd ~/Documents/Proyecto2-SO/MainSystem/Master
 make
+
 chmod +x run_mpi_safe.sh
 sudo cp run_mpi_safe.sh /usr/local/bin/mpirun-safe
 sudo chmod +x /usr/local/bin/mpirun-safe

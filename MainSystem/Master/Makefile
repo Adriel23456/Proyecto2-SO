@@ -7,6 +7,9 @@ OMPI_ROOT ?= /opt/openmpi-4.1.6
 MPICC     := $(OMPI_ROOT)/bin/mpicc
 RPATH_FLAG := -Wl,-rpath,$(OMPI_ROOT)/lib
 
+# ====== Config TFT ==========================================================
+TFT_LIB_DIR ?= /usr/local/lib
+
 # ====== Flags de compilación/enlace ========================================
 CSTD   ?= c99
 OPT    ?= -O2
@@ -14,7 +17,7 @@ WARN   ?= -Wall -Wextra
 DEFS   ?= -DMASTER_BUILD
 
 CFLAGS := $(WARN) $(OPT) -std=$(CSTD) $(DEFS)
-LDFLAGS := $(RPATH_FLAG) -lm
+LDFLAGS := $(RPATH_FLAG) -L$(TFT_LIB_DIR) -ltft -lm
 
 # ====== Directorios / Salida ===============================================
 SRC_DIR    := .

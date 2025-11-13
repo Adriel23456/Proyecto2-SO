@@ -25,6 +25,7 @@
 #include "image_utils.h"
 #include "mpi_comm.h"
 #include "histogram.h"
+#include "libtft.h"   // <-- NUEVO: para usar tft_init, tft_load_cvc_file, tft_close
 
 // ============================================================================
 // FUNCIONES AUXILIARES
@@ -52,11 +53,13 @@ int main(int argc, char** argv) {
     // ========================================================================
     
     MPI_Init(&argc, &argv);
-    char pname[MPI_MAX_PROCESSOR_NAME]; int plen=0;
-    MPI_Get_processor_name(pname, &plen);
-    printf("[MASTER] Ejecutando en host %s (rank %d)\n", pname, world_rank);
     MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
     MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+
+    char pname[MPI_MAX_PROCESSOR_NAME]; 
+    int plen = 0;
+    MPI_Get_processor_name(pname, &plen);
+    printf("[MASTER] Ejecutando en host %s (rank %d)\n", pname, world_rank);
     
     start_time = MPI_Wtime();
     
@@ -334,6 +337,36 @@ int main(int argc, char** argv) {
             fprintf(stderr, "[ERROR] No se pudo generar archivo CVC del histograma\n");
         } else {
             printf("[MASTER] ✓ Histograma CVC guardado en: %s\n", hist_cvc_path);
+
+            // ================================================================
+            // MOSTRAR HISTOGRAMA EN EL TFT USANDO LIBTFT
+            // ================================================================
+            printf("[MASTER] Inicializando TFT para mostrar histograma...\n");
+
+            tft_handle_t *tft = tft_init();
+            if (!tft) {
+                fprintf(stderr,
+                        "[MASTER] [WARN] No se pudo inicializar el TFT.\n"
+                        "         Verifica:\n"
+                        "           1) Drivers cargados (lsmod | grep tft)\n"
+                        "           2) Dispositivo /dev/tft_device existe\n"
+                        "           3) Permisos (quizá ejecutar con sudo o ajustar udev)\n");
+            } else {
+                printf("[MASTER] TFT inicializado correctamente. Cargando CVC...\n");
+                int tft_ret = tft_load_cvc_file(tft, hist_cvc_path);
+
+                if (tft_ret < 0) {
+                    fprintf(stderr,
+                            "[MASTER] [WARN] Error al cargar CVC en el TFT (código %d)\n"
+                            "         Revisa que el archivo exista y el formato sea X<TAB>Y<TAB>COLOR.\n",
+                            tft_ret);
+                } else {
+                    printf("[MASTER] ✓ Histograma mostrado en el TFT correctamente\n");
+                }
+
+                // Cerrar siempre el handle del TFT
+                tft_close(tft);
+            }
         }
         
         free_histogram(hist);

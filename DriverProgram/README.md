@@ -187,6 +187,15 @@ sudo insmod tft_driver.ko
 
 # Verificar que se cargaron correctamente
 lsmod | grep -E 'tft|gpio'
+
+# Copiar la librería estática
+sudo cp libtft.a /usr/local/lib/
+
+# Copiar el header público
+sudo cp libtft.h /usr/local/include/
+
+#Extra para asegurar que todo bien!
+sudo ldconfig
 ```
 
 **Salida esperada:**

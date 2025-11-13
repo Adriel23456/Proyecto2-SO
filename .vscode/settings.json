@@ -1,6 +1,7 @@
 {
     "files.associations": {
-        "config.h": "c"
+        "config.h": "c",
+        "libtft.h": "c"
     },
     "git.ignoreLimitWarning": true
 }
