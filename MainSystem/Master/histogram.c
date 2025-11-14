@@ -327,7 +327,6 @@ bool generate_histogram_png(const Histogram *hist, const char *filename) {
     const char *ylabel = "FRECUENCIA";
     
     int xlabel_len = (int)strlen(xlabel);
-    int ylabel_len = (int)strlen(ylabel);
     
     // Eje X: centrado abajo en el margen inferior
     int xlabel_x = img_width / 2 - (xlabel_len * 6) / 2; // 6 px por caracter (5 + 1 espacio)
