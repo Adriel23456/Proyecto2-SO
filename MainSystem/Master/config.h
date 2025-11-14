@@ -23,22 +23,12 @@
 #define TAG_RESULT_SECTION   200
 
 // ============================================================================
-// MÁSCARAS SOBEL (Hardcoded - 3x3)
+// MÁSCARAS SOBEL (cargadas desde JSON)
 // ============================================================================
 
-// Máscara Sobel para detección de bordes en X
-static const float SOBEL_X[3][3] = {
-    {-1.0f,  0.0f,  1.0f},
-    {-2.0f,  0.0f,  2.0f},
-    {-1.0f,  0.0f,  1.0f}
-};
-
-// Máscara Sobel para detección de bordes en Y
-static const float SOBEL_Y[3][3] = {
-    {-1.0f, -2.0f, -1.0f},
-    { 0.0f,  0.0f,  0.0f},
-    { 1.0f,  2.0f,  1.0f}
-};
+// Ruta estática del archivo JSON con las máscaras Sobel
+// Nota: el loader expandirá el '~' usando la variable de entorno HOME.
+#define SOBEL_JSON_PATH "~/Documents/Proyecto2-SO/MainSystem/Master/sobel.json"
 
 // ============================================================================
 // ESTRUCTURAS DE DATOS

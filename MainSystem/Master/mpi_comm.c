@@ -8,6 +8,156 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h> // para isdigit, etc.
+
+/* ============================================================================
+ *  MÁSCARAS SOBEL: carga desde JSON con fallback a valores por defecto
+ * ==========================================================================*/
+
+static const float DEFAULT_SOBEL_X[3][3] = {
+    {-1.0f,  0.0f,  1.0f},
+    {-2.0f,  0.0f,  2.0f},
+    {-1.0f,  0.0f,  1.0f}
+};
+
+static const float DEFAULT_SOBEL_Y[3][3] = {
+    {-1.0f, -2.0f, -1.0f},
+    { 0.0f,  0.0f,  0.0f},
+    { 1.0f,  2.0f,  1.0f}
+};
+
+// Aquí guardaremos las máscaras realmente usadas para enviar a los slaves
+static float SOBEL_X[3][3];
+static float SOBEL_Y[3][3];
+static int sobel_initialized = 0;
+
+// Copia los valores por defecto a SOBEL_X / SOBEL_Y
+static void sobel_set_defaults(void) {
+    memcpy(SOBEL_X, DEFAULT_SOBEL_X, sizeof(SOBEL_X));
+    memcpy(SOBEL_Y, DEFAULT_SOBEL_Y, sizeof(SOBEL_Y));
+}
+
+// Expande "~" al principio usando $HOME (para SOBEL_JSON_PATH)
+static int expand_home_path(const char *in, char *out, size_t out_size) {
+    if (!in || !out || out_size == 0) return -1;
+
+    if (in[0] == '~') {
+        const char *home = getenv("HOME");
+        if (!home) return -1;
+        // saltar '~'
+        int written = snprintf(out, out_size, "%s%s", home, in + 1);
+        return (written < 0 || (size_t)written >= out_size) ? -1 : 0;
+    } else {
+        size_t len = strlen(in);
+        if (len >= out_size) return -1;
+        memcpy(out, in, len + 1);
+        return 0;
+    }
+}
+
+// Lee el archivo completo en memoria (buffer null-terminated)
+static char* read_file_to_buffer(const char *path, long *out_size) {
+    FILE *f = fopen(path, "r");
+    if (!f) return NULL;
+
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        return NULL;
+    }
+
+    long size = ftell(f);
+    if (size < 0) {
+        fclose(f);
+        return NULL;
+    }
+    rewind(f);
+
+    char *buffer = (char*)malloc((size_t)size + 1);
+    if (!buffer) {
+        fclose(f);
+        return NULL;
+    }
+
+    size_t read = fread(buffer, 1, (size_t)size, f);
+    fclose(f);
+    buffer[read] = '\0';
+
+    if (out_size) *out_size = (long)read;
+    return buffer;
+}
+
+// Avanza el puntero hasta el siguiente carácter que pueda comenzar un número
+static char* skip_to_number(char *p) {
+    while (*p) {
+        if (*p == '-' || *p == '+' || *p == '.' || isdigit((unsigned char)*p)) {
+            return p;
+        }
+        p++;
+    }
+    return NULL;
+}
+
+// Parsea 9 floats desde el texto a partir de la clave dada ("sobel_x" o "sobel_y")
+static int parse_sobel_matrix(char *buffer, const char *key, float mat[3][3]) {
+    char *p = strstr(buffer, key);
+    if (!p) return -1;
+
+    // Buscar el primer '[' después de la clave
+    p = strchr(p, '[');
+    if (!p) return -1;
+
+    // Ahora extraemos 9 números
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) {
+            p = skip_to_number(p);
+            if (!p) return -1;
+            char *endptr = NULL;
+            float val = strtof(p, &endptr);
+            if (p == endptr) return -1;  // no se pudo parsear
+            mat[i][j] = val;
+            p = endptr;
+        }
+    }
+
+    return 0;
+}
+
+// Inicializa SOBEL_X / SOBEL_Y con datos desde sobel.json o con los valores por defecto
+static void init_sobel_from_json(void) {
+    if (sobel_initialized) return;
+    sobel_initialized = 1;
+
+    // Primero ponemos valores por defecto
+    sobel_set_defaults();
+
+    char path_expanded[512];
+    if (expand_home_path(SOBEL_JSON_PATH, path_expanded, sizeof(path_expanded)) != 0) {
+        fprintf(stderr, "[MASTER] No se pudo expandir ruta de sobel.json, usando máscaras Sobel por defecto.\n");
+        return;
+    }
+
+    long file_size = 0;
+    char *buffer = read_file_to_buffer(path_expanded, &file_size);
+    if (!buffer) {
+        fprintf(stderr, "[MASTER] No se pudo abrir %s, usando máscaras Sobel por defecto.\n",
+                path_expanded);
+        return;
+    }
+
+    int ok_x = parse_sobel_matrix(buffer, "sobel_x", SOBEL_X);
+    int ok_y = parse_sobel_matrix(buffer, "sobel_y", SOBEL_Y);
+
+    if (ok_x != 0 || ok_y != 0) {
+        fprintf(stderr, "[MASTER] Error parseando %s, usando máscaras Sobel por defecto.\n",
+                path_expanded);
+        // Volvemos a valores por defecto por seguridad
+        sobel_set_defaults();
+    } else {
+        printf("[MASTER] Máscaras Sobel cargadas desde %s\n", path_expanded);
+    }
+
+    free(buffer);
+}
 
 // ============================================================================
 // IMPLEMENTACIÓN: Funciones Auxiliares
@@ -37,6 +187,9 @@ void print_mpi_info(int world_rank, int world_size) {
 
 bool send_sobel_mask(int slave_rank) {
     printf("[MASTER] Enviando máscara Sobel a slave %d\n", slave_rank);
+
+    // Asegurarnos de que SOBEL_X / SOBEL_Y están inicializadas
+    init_sobel_from_json();
     
     // Enviar máscara Sobel X (aplanada a 1D)
     float sobel_x_flat[9];
