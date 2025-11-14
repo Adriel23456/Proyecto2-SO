@@ -198,17 +198,17 @@ int main(int argc, char** argv) {
     #include <omp.h>
     #include <unistd.h>
 
-    // Configurar threads al 75% de cores disponibles
+    // Configurar threads al 100% de cores disponibles
     int configure_openmp_threads() {
         int num_cores = sysconf(_SC_NPROCESSORS_ONLN);
-        int num_threads = (num_cores * 75) / 100;  // 75% de los cores
+        int num_threads = num_cores;  // 100% de los cores
         
         if (num_threads < 1) num_threads = 1;
         
         // Configurar OpenMP
         omp_set_num_threads(num_threads);
         
-        printf("[SLAVE] Sistema tiene %d cores, configurando %d threads OpenMP (75%%)\n", 
+        printf("[SLAVE] Sistema tiene %d cores, configurando %d threads OpenMP (100%%)\n", 
             num_cores, num_threads);
         
         return num_threads;

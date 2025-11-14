@@ -4,7 +4,7 @@
 *  \details    Coordina el procesamiento distribuido de imágenes con Sobel
 *  
 *  FLUJO:
-*  1. Inicializar MPI
+*  1. Inicializar MPI y OpenMP
 *  2. Verificar slaves disponibles
 *  3. Cargar imagen en escala de grises
 *  4. Dividir imagen en secciones
@@ -13,7 +13,7 @@
 *  7. Reconstruir imagen completa
 *  8. Generar result.png
 *  9. Calcular y guardar histograma (PNG y CVC)
-*  10. Finalizar
+*  10. Finalizar y mostrar metricas
 *******************************************************************************/
 
 #include <stdio.h>
@@ -47,6 +47,14 @@ void print_usage(const char *program_name) {
 int main(int argc, char** argv) {
     int world_rank, world_size;
     double start_time, end_time;
+
+    // Métricas por slave/ sección
+    double *t_send_start = NULL;   // tiempo antes de enviar datos a cada slave
+    double *t_send_end   = NULL;   // tiempo después de enviar datos (máscara+sección)
+    double *t_recv_end   = NULL;   // tiempo después de recibir la sección procesada
+
+    long long *bytes_sent      = NULL;  // bytes enviados al slave i
+    long long *bytes_received  = NULL;  // bytes recibidos desde el slave i
     
     // ========================================================================
     // PASO 1: Inicializar MPI y OpenMP
@@ -135,6 +143,20 @@ int main(int argc, char** argv) {
     }
     
     printf("[MASTER] ✓ Slaves disponibles: %d\n\n", num_slaves);
+
+    // Reservar memoria para métricas por slave (uno por sección)
+    t_send_start  = (double*)calloc(num_slaves, sizeof(double));
+    t_send_end    = (double*)calloc(num_slaves, sizeof(double));
+    t_recv_end    = (double*)calloc(num_slaves, sizeof(double));
+    bytes_sent    = (long long*)calloc(num_slaves, sizeof(long long));
+    bytes_received= (long long*)calloc(num_slaves, sizeof(long long));
+
+    if (!t_send_start || !t_send_end || !t_recv_end ||
+        !bytes_sent || !bytes_received) {
+        fprintf(stderr, "[ERROR] No se pudo asignar memoria para métricas\n");
+        MPI_Abort(MPI_COMM_WORLD, 1);
+        return 1;
+    }
     
     // ========================================================================
     // PASO 5: Cargar imagen en escala de grises
@@ -186,26 +208,41 @@ int main(int argc, char** argv) {
         int slave_rank = i + 1;  // Slaves son rank 1, 2, 3, ...
         
         printf("\n[MASTER] --- Procesando Slave %d ---\n", slave_rank);
-        
-        // Enviar máscara Sobel
+
+        // Tomar tiempo antes de empezar a enviar a este slave
+        t_send_start[i] = MPI_Wtime();
+
+        // --- 1) Enviar máscara Sobel ---
         if (!send_sobel_mask(slave_rank)) {
             fprintf(stderr, "[ERROR] Fallo al enviar máscara a slave %d\n", slave_rank);
             continue;
         }
+
+        // Bytes enviados por la máscara: 2 matrices 3x3 de float = 18 floats
+        bytes_sent[i] += (long long)(18 * sizeof(float));
         
-        // Enviar información de sección
+        // --- 2) Enviar información de sección ---
         if (!send_section_info(slave_rank, &sections[i])) {
             fprintf(stderr, "[ERROR] Fallo al enviar info de sección a slave %d\n", slave_rank);
             continue;
         }
+
+        // 4 enteros: section_id, start_row, num_rows, width
+        bytes_sent[i] += (long long)(4 * sizeof(int));
         
-        // Extraer y enviar sección de imagen
+        // --- 3) Extraer y enviar sección de imagen ---
         GrayscaleImage *section_img = extract_section(original_image, &sections[i]);
         if (!section_img) {
             fprintf(stderr, "[ERROR] No se pudo extraer sección %d\n", i);
             continue;
         }
         
+        // send_image_section primero envía 2 ints (width, height),
+        // luego width*height bytes (uint8_t)
+        int section_pixels = section_img->width * section_img->height;
+        bytes_sent[i] += (long long)(2 * sizeof(int));             // size_info
+        bytes_sent[i] += (long long)section_pixels * sizeof(uint8_t); // datos de imagen
+
         if (!send_image_section(slave_rank, section_img)) {
             fprintf(stderr, "[ERROR] Fallo al enviar sección de imagen a slave %d\n", slave_rank);
             free_grayscale_image(section_img);
@@ -213,6 +250,9 @@ int main(int argc, char** argv) {
         }
         
         free_grayscale_image(section_img);
+
+        // Tiempo cuando terminamos de enviar TODO a este slave
+        t_send_end[i] = MPI_Wtime();
         
         printf("[MASTER] ✓ Todos los datos enviados a slave %d\n", slave_rank);
     }
@@ -248,6 +288,12 @@ int main(int argc, char** argv) {
             fprintf(stderr, "[ERROR] Fallo al recibir información de sección\n");
             break;
         }
+
+        // La info que llega desde el slave: 4 ints
+        if (recv_info.section_id >= 0 && recv_info.section_id < num_slaves) {
+            int idx = recv_info.section_id;
+            bytes_received[idx] += (long long)(4 * sizeof(int));
+        }
         
         // Recibir la sección procesada
         GrayscaleImage *processed = receive_image_section(source_rank, &recv_info);
@@ -255,13 +301,23 @@ int main(int argc, char** argv) {
             fprintf(stderr, "[ERROR] Fallo al recibir sección procesada desde slave %d\n", source_rank);
             continue;
         }
+
+        // size_info: 2 ints, más width*height bytes de imagen
+        int section_idx = recv_info.section_id;
+        if (section_idx >= 0 && section_idx < num_slaves) {
+            bytes_received[section_idx] += (long long)(2 * sizeof(int));
+            bytes_received[section_idx] += 
+                (long long)processed->width * processed->height * sizeof(uint8_t);
+        }
         
         // Guardar sección en el array correspondiente
-        int section_idx = recv_info.section_id;
         if (section_idx >= 0 && section_idx < num_slaves) {
             processed_sections[section_idx] = processed;
             received_flags[section_idx] = 1;
             sections_received++;
+
+            // Tomar tiempo cuando terminamos de recibir la sección de este slave/sección
+            t_recv_end[section_idx] = MPI_Wtime();
             
             printf("[MASTER] ✓ Sección %d completada (%d/%d)\n", 
                    section_idx, sections_received, num_slaves);
@@ -421,6 +477,88 @@ int main(int argc, char** argv) {
     free_grayscale_image(result_image);
     
     end_time = MPI_Wtime();
+
+    // ====================================================================
+    // MÉTRICAS FINALES
+    // ====================================================================
+    long long total_bytes_sent = 0;
+    long long total_bytes_received = 0;
+    double total_comm_up = 0.0;      // tiempo de envío (master -> slaves)
+    double total_turnaround = 0.0;   // tiempo desde fin de envío hasta fin de recepción
+
+    for (int i = 0; i < num_slaves; i++) {
+        total_bytes_sent     += bytes_sent[i];
+        total_bytes_received += bytes_received[i];
+
+        double comm_up = t_send_end[i] - t_send_start[i];   // "latencia/red de subida" hacia el nodo i
+        double turnaround = t_recv_end[i] - t_send_end[i];  // proc nodo + red de bajada
+
+        total_comm_up     += comm_up;
+        total_turnaround  += turnaround;
+    }
+
+    double avg_comm_up      = (num_slaves > 0) ? total_comm_up / num_slaves : 0.0;
+    double avg_node_time    = (num_slaves > 0) ? total_turnaround / num_slaves : 0.0;
+
+    // Consideramos como "latencia/red promedio" el tiempo promedio de comunicación
+    // desde el master hacia los slaves (subida de datos).
+    double avg_network_latency = avg_comm_up;
+
+    long long total_pixels = 0;
+    if (original_image) {
+        total_pixels = (long long)original_image->width * original_image->height;
+    }
+
+    double total_data_mb = (double)(total_bytes_sent + total_bytes_received) / (1024.0 * 1024.0);
+    double total_time = end_time - start_time;
+
+    // Métrica de eficiencia propuesta:
+    //   E = píxeles procesados / (datos totales en MB * (T_prom_nodo + T_red_prom))
+    //
+    //   - Cuanto más alta, mejor.
+    //   - Integra:
+    //       * tamaño del problema (píxeles)
+    //       * costo de red (datos transferidos y latencia promedio)
+    //       * costo computacional (tiempo promedio de los nodos)
+    double efficiency_index = 0.0;
+    double denom = total_data_mb * (avg_node_time + avg_network_latency);
+    if (denom > 0.0) {
+        efficiency_index = (double)total_pixels / denom; // unidades ~ px / (MB·s)
+    }
+
+    printf("\n");
+    printf("═══════════════════════════════════════════════════════════\n");
+    printf("  MÉTRICAS DE RENDIMIENTO (MASTER)\n");
+    printf("═══════════════════════════════════════════════════════════\n");
+
+    for (int i = 0; i < num_slaves; i++) {
+        double comm_up = t_send_end[i] - t_send_start[i];
+        double turnaround = t_recv_end[i] - t_send_end[i];
+
+        printf("  Slave %d (Sección %d):\n", i + 1, i);
+        printf("    - Tiempo de comunicación (envío master -> slave): %.4f s\n", comm_up);
+        printf("    - Tiempo de procesamiento+retorno (slave -> master): %.4f s\n", turnaround);
+        printf("    - Bytes enviados:   %lld bytes\n", bytes_sent[i]);
+        printf("    - Bytes recibidos:  %lld bytes\n", bytes_received[i]);
+    }
+
+    printf("-----------------------------------------------------------\n");
+    printf("  RESUMEN GLOBAL:\n");
+    printf("    - Tiempo total (master):            %.4f s\n", total_time);
+    printf("    - Tiempo promedio de RED (subida):  %.4f s\n", avg_network_latency);
+    printf("    - Tiempo promedio de NODO:          %.4f s\n", avg_node_time);
+    printf("    - Bytes totales enviados:           %lld bytes\n", total_bytes_sent);
+    printf("    - Bytes totales recibidos:          %lld bytes\n", total_bytes_received);
+    printf("    - Datos totales transferidos:       %.2f MB\n", total_data_mb);
+    printf("    - Píxeles procesados:               %lld px\n", total_pixels);
+    printf("    - Índice de eficiencia (px/(MB·s)): %.4f\n", efficiency_index);
+    printf("═══════════════════════════════════════════════════════════\n");
+
+    free(t_send_start);
+    free(t_send_end);
+    free(t_recv_end);
+    free(bytes_sent);
+    free(bytes_received);
     
     printf("\n");
     printf("═══════════════════════════════════════════════════════════\n");
