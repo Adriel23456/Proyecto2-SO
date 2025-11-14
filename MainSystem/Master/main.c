@@ -455,28 +455,8 @@ int main(int argc, char** argv) {
     }
     
     printf("\n");
-    
-    // ========================================================================
-    // PASO 12: Limpieza y finalización
-    // ========================================================================
-    
-    printf("═══════════════════════════════════════════════════════════\n");
-    printf("  LIMPIEZA Y FINALIZACIÓN\n");
-    printf("═══════════════════════════════════════════════════════════\n");
-    
-    // Liberar memoria
-    for (int i = 0; i < num_slaves; i++) {
-        if (processed_sections[i]) {
-            free_grayscale_image(processed_sections[i]);
-        }
-    }
-    free(processed_sections);
-    free(received_flags);
-    free(sections);
-    free_grayscale_image(original_image);
-    free_grayscale_image(result_image);
-    
-    end_time = MPI_Wtime();
+
+    end_time = MPI_Wtime(); // Finalizacion del tiempo de procesamiento del master
 
     // ====================================================================
     // MÉTRICAS FINALES
@@ -560,6 +540,26 @@ int main(int argc, char** argv) {
     free(bytes_sent);
     free(bytes_received);
     
+    // ========================================================================
+    // PASO 12: Limpieza y finalización
+    // ========================================================================
+    
+    printf("═══════════════════════════════════════════════════════════\n");
+    printf("  LIMPIEZA Y FINALIZACIÓN\n");
+    printf("═══════════════════════════════════════════════════════════\n");
+    
+    // Liberar memoria
+    for (int i = 0; i < num_slaves; i++) {
+        if (processed_sections[i]) {
+            free_grayscale_image(processed_sections[i]);
+        }
+    }
+    free(processed_sections);
+    free(received_flags);
+    free(sections);
+    free_grayscale_image(original_image);
+    free_grayscale_image(result_image);
+
     printf("\n");
     printf("═══════════════════════════════════════════════════════════\n");
     printf("  ✓ PROCESAMIENTO COMPLETADO EXITOSAMENTE\n");
