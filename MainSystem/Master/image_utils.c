@@ -9,14 +9,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 // ============================================================================
 // STB IMAGE LIBRARY (single-header libraries)
 // ============================================================================
 
-#define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
-
-#define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
 
 // ============================================================================
@@ -62,23 +63,46 @@ GrayscaleImage* load_image_grayscale(const char *filename) {
     
     // Convertir a escala de grises
     printf("[MASTER] Convirtiendo a escala de grises...\n");
-    
-    for (int i = 0; i < width * height; i++) {
-        if (channels == 1) {
-            // Ya está en escala de grises
-            gray_img->data[i] = img_data[i];
-        } else if (channels == 3 || channels == 4) {
-            // RGB o RGBA -> Grayscale usando fórmula estándar
-            // Gray = 0.299*R + 0.587*G + 0.114*B
-            unsigned char r = img_data[i * channels + 0];
-            unsigned char g = img_data[i * channels + 1];
-            unsigned char b = img_data[i * channels + 2];
-            gray_img->data[i] = (uint8_t)(0.299f * r + 0.587f * g + 0.114f * b);
-        } else {
-            // Formato desconocido, tomar primer canal
-            gray_img->data[i] = img_data[i * channels];
+
+    int total_pixels = width * height;
+
+    #ifdef _OPENMP
+        printf("[MASTER] OpenMP activado en conversión a gris\n");
+        #pragma omp parallel for schedule(static)
+        for (int i = 0; i < total_pixels; i++) {
+            if (channels == 1) {
+                // Ya está en escala de grises
+                gray_img->data[i] = img_data[i];
+            } else if (channels == 3 || channels == 4) {
+                // RGB o RGBA -> Grayscale usando fórmula estándar
+                // Gray = 0.299*R + 0.587*G + 0.114*B
+                unsigned char r = img_data[i * channels + 0];
+                unsigned char g = img_data[i * channels + 1];
+                unsigned char b = img_data[i * channels + 2];
+                gray_img->data[i] = (uint8_t)(0.299f * r + 0.587f * g + 0.114f * b);
+            } else {
+                // Formato desconocido, tomar primer canal
+                gray_img->data[i] = img_data[i * channels];
+            }
         }
-    }
+    #else
+        for (int i = 0; i < total_pixels; i++) {
+            if (channels == 1) {
+                // Ya está en escala de grises
+                gray_img->data[i] = img_data[i];
+            } else if (channels == 3 || channels == 4) {
+                // RGB o RGBA -> Grayscale usando fórmula estándar
+                // Gray = 0.299*R + 0.587*G + 0.114*B
+                unsigned char r = img_data[i * channels + 0];
+                unsigned char g = img_data[i * channels + 1];
+                unsigned char b = img_data[i * channels + 2];
+                gray_img->data[i] = (uint8_t)(0.299f * r + 0.587f * g + 0.114f * b);
+            } else {
+                // Formato desconocido, tomar primer canal
+                gray_img->data[i] = img_data[i * channels];
+            }
+        }
+    #endif
     
     // Liberar imagen original
     stbi_image_free(img_data);
@@ -179,15 +203,18 @@ GrayscaleImage* extract_section(const GrayscaleImage *original,
     }
     
     // Copiar datos de la sección
-    for (int row = 0; row < section->num_rows; row++) {
-        int src_row = section->start_row + row;
-        int src_offset = src_row * original->width;
-        int dst_offset = row * section->width;
-        
-        memcpy(section_img->data + dst_offset,
-               original->data + src_offset,
-               section->width * sizeof(uint8_t));
-    }
+    #ifdef _OPENMP
+        #pragma omp parallel for schedule(static)
+    #endif
+        for (int row = 0; row < section->num_rows; row++) {
+            int src_row = section->start_row + row;
+            int src_offset = src_row * original->width;
+            int dst_offset = row * section->width;
+            
+            memcpy(section_img->data + dst_offset,
+                original->data + src_offset,
+                section->width * sizeof(uint8_t));
+        }
     
     return section_img;
 }
@@ -219,31 +246,47 @@ GrayscaleImage* reconstruct_image(GrayscaleImage **sections,
     memset(full_img->data, 0, width * height * sizeof(uint8_t));
 
     // 1) Copiar cada sección a su posición correspondiente
-    for (int i = 0; i < num_sections; i++) {
-        if (!sections[i]) {
-            fprintf(stderr, "[ERROR] Sección %d es NULL\n", i);
-            continue;
-        }
-
-        const SectionInfo *info = &section_infos[i];
-
-        printf("[MASTER]   Copiando sección %d (filas %d-%d)\n",
-               i, info->start_row, info->start_row + info->num_rows - 1);
-
-        for (int row = 0; row < info->num_rows; row++) {
-            int dst_row = info->start_row + row;
-            if (dst_row < 0 || dst_row >= height) {
+        // 1) Copiar cada sección a su posición correspondiente
+    #ifdef _OPENMP
+        printf("[MASTER] Reconstrucción paralela de secciones con OpenMP\n");
+        #pragma omp parallel for schedule(static)
+    #endif
+        for (int i = 0; i < num_sections; i++) {
+            if (!sections[i]) {
+                #ifdef _OPENMP
+                #pragma omp critical
+                #endif
+                {
+                    fprintf(stderr, "[ERROR] Sección %d es NULL\n", i);
+                }
                 continue;
             }
 
-            int dst_offset = dst_row * width;
-            int src_offset = row * info->width;
+            const SectionInfo *info = &section_infos[i];
 
-            memcpy(full_img->data + dst_offset,
-                   sections[i]->data + src_offset,
-                   info->width * sizeof(uint8_t));
+            // Log protegido para que no se mezclen prints entre threads
+            #ifdef _OPENMP
+            #pragma omp critical
+            #endif
+            {
+                printf("[MASTER]   Copiando sección %d (filas %d-%d)\n",
+                    i, info->start_row, info->start_row + info->num_rows - 1);
+            }
+
+            for (int row = 0; row < info->num_rows; row++) {
+                int dst_row = info->start_row + row;
+                if (dst_row < 0 || dst_row >= height) {
+                    continue;
+                }
+
+                int dst_offset = dst_row * width;
+                int src_offset = row * info->width;
+
+                memcpy(full_img->data + dst_offset,
+                    sections[i]->data + src_offset,
+                    info->width * sizeof(uint8_t));
+            }
         }
-    }
 
     // 2) Corregir la línea negra entre secciones
     //

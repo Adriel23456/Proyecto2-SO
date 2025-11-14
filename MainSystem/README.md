@@ -28,59 +28,74 @@ mpirun-safe ~/Documents/Proyecto2-SO/ImagesExamples/image1.png
 scp result.png result_histogram.cvc result_histogram.png \
     adriel@adriel-System:~/Documents/Proyecto2-SO/MainSystem/Slave/
 
-# Monitorear mientras el programa corre
+# Monitorear el sistema local de Raspberry Pi 2
+------------------------------------------
 #!/bin/bash
 
-# === FUNCIÓN PARA MEDIR USO DE CPU EN UN HOST (LOCAL O REMOTO) ===
-get_cpu_usage() {
-    host="$1"
+get_cpu_usage_per_core() {
+    prev=()
+    curr=()
 
-    if [ "$host" = "localhost" ]; then
-        top_out=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}')
-    else
-        top_out=$(ssh "$host" "top -bn1 | grep 'Cpu(s)'" 2>/dev/null | awk '{print \$2}')
-    fi
+    # ======== Lectura inicial ========
+    while read -r line; do
+        if [[ "$line" =~ ^cpu[0-9]+ ]]; then
+            prev+=("$line")
+        fi
+    done < /proc/stat
 
-    if [[ -z "$top_out" ]]; then
-        echo "N/A"
-    else
-        echo "$top_out"
-    fi
+    sleep 0.5
+
+    # ======== Lectura después ========
+    while read -r line; do
+        if [[ "$line" =~ ^cpu[0-9]+ ]]; then
+            curr+=("$line")
+        fi
+    done < /proc/stat
+
+    core_count=${#curr[@]}
+
+    for ((i=0; i<core_count; i++)); do
+        read -ra p <<< "${prev[$i]}"
+        read -ra c <<< "${curr[$i]}"
+
+        idle_prev=${p[4]}
+        idle_curr=${c[4]}
+
+        total_prev=0
+        total_curr=0
+
+        for n in "${p[@]:1}"; do total_prev=$((total_prev + n)); done
+        for n in "${c[@]:1}"; do total_curr=$((total_curr + n)); done
+
+        diff_total=$(( total_curr - total_prev ))
+        diff_idle=$(( idle_curr - idle_prev ))
+
+        usage=$(( 100 * (diff_total - diff_idle) / diff_total ))
+
+        echo "$usage"
+    done
 }
 
-# Monitorear mientras el programa corre
-echo "Ejecuta tu programa MPI en otra terminal"
-echo "Presiona Ctrl+C para detener el monitoreo"
-echo
-
+# ===== MONITOR =====
 while true; do
     clear
-    echo "$(date '+%H:%M:%S') - USO DE CPU EN CLUSTER"
+    echo "$(date '+%H:%M:%S') - USO DE CPU POR NÚCLEO"
     echo "═══════════════════════════════════════════════════════════"
-    
-    for host in localhost slave1 slave2 slave3; do
-        usage=$(get_cpu_usage "$host")
 
-        printf "  %-15s: " "$host"
+    mapfile -t usages < <(get_cpu_usage_per_core)
 
-        if [[ "$usage" != "N/A" ]]; then
-            usage_int=${usage%.*}
+    core=0
+    for usage in "${usages[@]}"; do
+        bars=$(( usage / 5 ))
+        bar=$(printf "%${bars}s" | tr ' ' '█')
 
-            if [[ "$usage_int" =~ ^[0-9]+$ ]]; then
-                # Colorear según nivel
-                if [ "$usage_int" -gt 70 ]; then
-                    echo -e "\033[0;32m${usage}%\033[0m ████████"
-                elif [ "$usage_int" -gt 30 ]; then
-                    echo -e "\033[1;33m${usage}%\033[0m ████"
-                else
-                    echo -e "\033[0;31m${usage}%\033[0m ██"
-                fi
-            else
-                echo -e "\033[0;90mError CPU\033[0m"
-            fi
-        else
-            echo -e "\033[0;90mNo disponible\033[0m"
+        if (( usage > 70 )); then color="\033[0;32m"
+        elif (( usage > 30 )); then color="\033[1;33m"
+        else color="\033[0;31m"
         fi
+
+        printf "  Core %-2d: ${color}%3d%%\033[0m %s\n" "$core" "$usage" "$bar"
+        ((core++))
     done
 
     echo "═══════════════════════════════════════════════════════════"
