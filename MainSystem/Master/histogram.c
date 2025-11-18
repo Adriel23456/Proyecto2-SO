@@ -227,19 +227,21 @@ bool generate_histogram_png(const Histogram *hist, const char *filename) {
     const int img_height = 320;
     const int padding    = 40;
     
-    // Área de dibujo del histograma (marco externo)
+    // Área del marco
     const int plot_left   = padding;
     const int plot_right  = img_width - padding;
     const int plot_top    = padding;
     const int plot_bottom = img_height - padding;
+    const int plot_width  = plot_right - plot_left;
+    const int plot_height = plot_bottom - plot_top;
     
-    // ÁREA INTERNA: donde se dibujan las barras (dentro del marco)
-    const int plot_left_inner   = plot_left + 1;
-    const int plot_right_inner  = plot_right - 1;
-    const int plot_top_inner    = plot_top + 1;
-    const int plot_bottom_inner = plot_bottom - 1;
-    const int plot_width_inner  = plot_right_inner - plot_left_inner;
-    const int plot_height_inner = plot_bottom_inner - plot_top_inner;
+    // Área para las barras (evitando el marco)
+    const int bar_left   = plot_left + 1;
+    const int bar_right  = plot_right - 1;
+    const int bar_top    = plot_top + 1;
+    const int bar_bottom = plot_bottom;  // SIN -1 para llenar hasta abajo
+    const int bar_width  = bar_right - bar_left;
+    const int bar_height = bar_bottom - bar_top;
     
     // Crear imagen RGB
     uint8_t *img_data = (uint8_t*)calloc(img_width * img_height * 3, sizeof(uint8_t));
@@ -270,45 +272,43 @@ bool generate_histogram_png(const Histogram *hist, const char *filename) {
     const uint8_t grid_r  = 200, grid_g  = 200, grid_b  = 200;
     const uint8_t text_r  = 0,   text_g  = 0,   text_b  = 0;
     
-    // ===== Líneas de cuadrícula (usando el área EXTERNA) =====
+    // ===== Líneas de cuadrícula =====
     for (int i = 0; i <= 4; i++) {
-        int x = plot_left + ((plot_right - plot_left) * i) / 4;
+        int x = plot_left + (plot_width * i) / 4;
         for (int y = plot_top; y <= plot_bottom; y++) {
             set_pixel(img_data, img_width, img_height, x, y, grid_r, grid_g, grid_b);
         }
     }
     
     for (int i = 0; i <= 4; i++) {
-        int y = plot_bottom - ((plot_bottom - plot_top) * i) / 4;
+        int y = plot_bottom - (plot_height * i) / 4;
         for (int x = plot_left; x <= plot_right; x++) {
             set_pixel(img_data, img_width, img_height, x, y, grid_r, grid_g, grid_b);
         }
     }
     
-    // ===== Dibujar barras del histograma (usando el área INTERNA) =====
+    // ===== Dibujar barras del histograma =====
     for (int i = 0; i < HISTOGRAM_BINS; i++) {
-        int bar_height = (int)((float)hist->bins[i] / max_freq * (float)plot_height_inner);
-        if (bar_height <= 0) continue;
+        int barra_altura = (int)((float)hist->bins[i] / max_freq * (float)bar_height);
+        if (barra_altura <= 0) continue;
         
-        int y_start = plot_bottom_inner - bar_height;
-        int y_end   = plot_bottom_inner;
+        int y_start = bar_bottom - barra_altura;
+        int y_end   = bar_bottom;
         
-        // Mapear usando el área INTERNA
-        int x0 = plot_left_inner + (i * plot_width_inner) / HISTOGRAM_BINS;
-        int x1 = plot_left_inner + ((i + 1) * plot_width_inner) / HISTOGRAM_BINS;
-        if (x1 > plot_right_inner) x1 = plot_right_inner;
-        if (x1 <= x0) continue;
+        // Mapear usando bar_width para que llegue hasta bar_right
+        int x0 = bar_left + (i * bar_width) / HISTOGRAM_BINS;
+        int x1 = bar_left + ((i + 1) * bar_width) / HISTOGRAM_BINS;
+        if (x1 > bar_right) x1 = bar_right;
+        if (x1 <= x0) x1 = x0 + 1;
         
         for (int x = x0; x < x1; x++) {
-            if (x < plot_left_inner || x > plot_right_inner) continue;
             for (int y = y_start; y < y_end; y++) {
-                if (y < plot_top_inner || y > plot_bottom_inner) continue;
                 set_pixel(img_data, img_width, img_height, x, y, bar_r, bar_g, bar_b);
             }
         }
     }
     
-    // ===== Marco que encierra el histograma (se dibuja DESPUÉS) =====
+    // ===== Marco (se dibuja DESPUÉS de las barras) =====
     for (int x = plot_left; x <= plot_right; x++) {
         set_pixel(img_data, img_width, img_height, x, plot_top,    frame_r, frame_g, frame_b);
         set_pixel(img_data, img_width, img_height, x, plot_bottom, frame_r, frame_g, frame_b);
@@ -333,7 +333,7 @@ bool generate_histogram_png(const Histogram *hist, const char *filename) {
     }
     
     int ylabel_x = 5;
-    int ylabel_y = plot_top + ((plot_bottom - plot_top) / 2) - 4;
+    int ylabel_y = plot_top + (plot_height / 2) - 4;
     
     if (ylabel_y + 7 < img_height) {
         draw_text_5x7(img_data, img_width, img_height,
