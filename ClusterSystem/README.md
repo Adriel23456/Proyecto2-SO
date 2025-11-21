@@ -77,7 +77,7 @@ source ~/.bashrc
 
 # Instalar dependencias
 sudo apt update
-sudo apt install -y build-essential gfortran libhwloc-dev libevent-dev
+sudo apt install -y build-essential gfortran libhwloc-dev libevent-dev zlib1g-dev
 
 # Descargar OpenMPI 4.1.6
 cd ~
@@ -88,6 +88,7 @@ cd openmpi-4.1.6
 # Configurar para ARM7 32-bit con soporte heterogéneo
 ./configure --prefix=/opt/openmpi-4.1.6 \
             --enable-heterogeneous \
+            --with-zlib \
             --enable-mpi-fortran=no \
             --enable-mpirun-prefix-by-default \
             --with-hwloc=internal \
@@ -127,7 +128,7 @@ source ~/.bashrc
 
 # Instalar dependencias
 sudo apt update
-sudo apt install -y build-essential gfortran libhwloc-dev libevent-dev
+sudo apt install -y build-essential gfortran libhwloc-dev libevent-dev zlib1g-dev
 
 # Descargar OpenMPI 4.1.6
 cd ~
@@ -138,6 +139,7 @@ cd openmpi-4.1.6
 # Configurar para x86_64 con soporte heterogéneo
 ./configure --prefix=/opt/openmpi-4.1.6 \
             --enable-heterogeneous \
+            --with-zlib \
             --enable-mpi-fortran=no \
             --enable-mpirun-prefix-by-default \
             --with-hwloc=internal \
