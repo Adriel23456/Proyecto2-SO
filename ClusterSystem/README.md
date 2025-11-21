@@ -177,6 +177,10 @@ ompi_info | grep -i heterogeneous
 # Generar llave SSH
 [ -f ~/.ssh/id_ed25519 ] || ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519
 
+ssh-keygen -f ~/.ssh/known_hosts -R slave1
+ssh-keygen -f ~/.ssh/known_hosts -R slave2
+ssh-keygen -f ~/.ssh/known_hosts -R slave3
+
 # Copiar llave a todos los nodos (incluido el master mismo)
 ssh-copy-id -i ~/.ssh/id_ed25519.pub adriel@localhost
 ssh-copy-id -i ~/.ssh/id_ed25519.pub adriel@slave1
@@ -208,12 +212,12 @@ nano ~/.mpi_hostfile
 Contenido (ajusta IPs y slots según tu configuración):
 ```
 # Master (Raspberry Pi ARM7)
-192.168.18.242 slots=2
+localhost slots=1
 
 # Slaves x86_64
-192.168.18.10  slots=2
-192.168.18.241 slots=2
-192.168.18.90  slots=2
+slave1  slots=1
+slave2 slots=1
+slave3  slots=1
 ```
 
 ---
