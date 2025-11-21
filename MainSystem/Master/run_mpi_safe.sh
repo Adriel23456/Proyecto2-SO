@@ -112,9 +112,19 @@ cd "$APP_DIR" || {
     exit 1
 }
 
+# ===== FIX: DISABLE PMIx COMPRESSION =====
+export OMPI_MCA_pmix_compress=0
+export OMPI_MCA_pcompress_base_suppress=1
+
+echo
+echo "📌 Desactivando compresión PMIx (fix heterogéneo)"
+echo "   OMPI_MCA_pmix_compress=0"
+echo "   OMPI_MCA_pcompress_base_suppress=1"
+echo
+
 # ===== Ejecutar mpirun con variables OpenMP =====
 echo "▶ Ejecutando mpirun con OpenMP..."
-echo "$MPIRUN -np $NPROCS --hostfile $TEMP_HOSTFILE --map-by node --bind-to socket --report-bindings -x OMP_NUM_THREADS -x OMP_PROC_BIND -x OMP_PLACES -x PATH -x LD_LIBRARY_PATH ./main ${EXTRA_ARGS[*]}"
+echo "$MPIRUN -np $NPROCS --hostfile $TEMP_HOSTFILE --map-by node --bind-to socket --report-bindings --mca pmix_compress 0 --mca pcompress_base_suppress 1 -x OMP_NUM_THREADS -x OMP_PROC_BIND -x OMP_PLACES -x PATH -x LD_LIBRARY_PATH ./main ${EXTRA_ARGS[*]}"
 echo
 
 "$MPIRUN" \
