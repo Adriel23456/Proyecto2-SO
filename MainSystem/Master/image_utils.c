@@ -299,27 +299,27 @@ GrayscaleImage* reconstruct_image(GrayscaleImage **sections,
     //     - fila_top    = primera fila de la sección i+1
     //   Reemplazamos ambas por sus vecinas interiores para “borrar” el borde.
 
-    for (int i = 0; i < num_sections - 1; i++) {
-        const SectionInfo *info_top    = &section_infos[i];
-        const SectionInfo *info_bottom = &section_infos[i + 1];
-
-        int bottom_row = info_top->start_row + info_top->num_rows - 1; // borde inferior de arriba
-        int top_row    = info_bottom->start_row;                        // borde superior de abajo
-
-        // Corregir borde inferior de la sección superior
-        if (bottom_row > 0 && bottom_row < height) {
-            memcpy(full_img->data + bottom_row * width,
-                   full_img->data + (bottom_row - 1) * width,
-                   width * sizeof(uint8_t));
-        }
-
+    //for (int i = 0; i < num_sections - 1; i++) {
+    //    const SectionInfo *info_top    = &section_infos[i];
+    //    const SectionInfo *info_bottom = &section_infos[i + 1];
+    //
+    //    int bottom_row = info_top->start_row + info_top->num_rows - 1; // borde inferior de arriba
+    //    int top_row    = info_bottom->start_row;                        // borde superior de abajo
+    //
+    //    // Corregir borde inferior de la sección superior
+    //    if (bottom_row > 0 && bottom_row < height) {
+    //        memcpy(full_img->data + bottom_row * width,
+    //               full_img->data + (bottom_row - 1) * width,
+    //               width * sizeof(uint8_t));
+    //    }
+    //
         // Corregir borde superior de la sección inferior
-        if (top_row >= 0 && top_row < height - 1) {
-            memcpy(full_img->data + top_row * width,
-                   full_img->data + (top_row + 1) * width,
-                   width * sizeof(uint8_t));
-        }
-    }
+    //    if (top_row >= 0 && top_row < height - 1) {
+    //        memcpy(full_img->data + top_row * width,
+    //               full_img->data + (top_row + 1) * width,
+    //               width * sizeof(uint8_t));
+    //    }
+    //}
 
     printf("[MASTER] Reconstrucción completada\n");
 
